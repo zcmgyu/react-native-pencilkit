@@ -22,13 +22,13 @@ PencilKit-powered drawing canvas for **React Native / Expo** with Apple Pencil s
 Using npm:
 
 ```bash
-npm install react-native-pencilkit
+npm install rn-pencil-kit
 ```
 
 Using Yarn:
 
 ```bash
-yarn add react-native-pencilkit
+yarn add rn-pencil-kit
 ```
 
 #### Expo projects
