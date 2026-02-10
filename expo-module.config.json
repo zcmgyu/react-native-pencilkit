@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["ReactNativePencilKitModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.pencilkit.ReactNativePencilKitModule"]
+  }
+}
