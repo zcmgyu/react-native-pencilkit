@@ -1,5 +1,5 @@
 import React, { useImperativeHandle, useRef } from "react";
-import { PencilKitViewProps, PencilKitViewRef } from './ReactNativePencilKit.types';
+import { PencilKitViewProps, PencilKitViewRef, ToolConfig } from './ReactNativePencilKit.types';
 
 import {
   requireNativeModule,
@@ -30,7 +30,7 @@ export const PencilKitView = React.forwardRef<
   useImperativeHandle(
     ref,
     () => ({
-      setupToolPicker: async () => {
+      setupToolPicker: async (toolConfig?: ToolConfig) => {
         if (
           Platform.OS === "ios" &&
           ReactNativePencilKit &&
@@ -38,7 +38,15 @@ export const PencilKitView = React.forwardRef<
         ) {
           const viewTag = findNodeHandle(viewRef.current);
           if (viewTag) {
-            await ReactNativePencilKit.setupToolPicker(viewTag);
+            // Convert ToolConfig to the format expected by native module
+            const nativeToolConfig = toolConfig ? {
+              type: toolConfig.type,
+              width: toolConfig.width,
+              color: toolConfig.color,
+              eraserType: toolConfig.eraserType,
+              fallbackTool: toolConfig.fallbackTool,
+            } : null;
+            await ReactNativePencilKit.setupToolPicker(viewTag, nativeToolConfig);
           }
         }
       },

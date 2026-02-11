@@ -58,10 +58,45 @@ export interface PencilKitViewProps {
 }
 
 /**
+ * Tool type for inking and selection tools
+ */
+export type ToolType = 
+  | "pen" 
+  | "marker" 
+  | "pencil" 
+  | "monoline" 
+  | "fountainPen" 
+  | "watercolor" 
+  | "crayon" 
+  | "reed" 
+  | "eraser" 
+  | "lasso";
+
+/**
+ * Tool configuration for setting default tool
+ * 
+ * Available inking tools:
+ * - pen, marker, pencil: Available on iOS 13+
+ * - monoline, fountainPen, watercolor, crayon: Available on iOS 17+
+ * - reed: Available on iOS 26+
+ * 
+ * Fallback behavior:
+ * - If the requested tool is not available, it will try the fallbackTool
+ * - If fallbackTool is not available or not specified, it will use pen as the final fallback
+ */
+export interface ToolConfig {
+  type: ToolType;
+  width?: number; // For inking tools, default: 10.0 for most tools, 20.0 for marker
+  color?: string; // Hex color string (e.g., "#000000" or "000000"), default: "#000000"
+  eraserType?: "vector" | "bitmap"; // For eraser tool, default: "vector"
+  fallbackTool?: ToolType; // Optional fallback tool if the requested tool is not available. If not specified or unavailable, defaults to pen
+}
+
+/**
  * Ref methods available on PencilKitView
  */
 export interface PencilKitViewRef {
-  setupToolPicker(): Promise<void>;
+  setupToolPicker(toolConfig?: ToolConfig): Promise<void>;
   clearDrawing(): Promise<void>;
   undo(): Promise<void>;
   redo(): Promise<void>;

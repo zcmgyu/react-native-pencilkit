@@ -37,9 +37,9 @@ public class ReactNativePencilKitModule: Module {
     }
 
     // Setup tool picker for a specific canvas
-    AsyncFunction("setupToolPicker") { (viewTag: Int) in
+    AsyncFunction("setupToolPicker") { (viewTag: Int, toolConfig: [String: Any]?) in
       await MainActor.run {
-        self.setupToolPicker(for: viewTag)
+        self.setupToolPicker(for: viewTag, toolConfig: toolConfig)
       }
     }
 
@@ -135,7 +135,7 @@ public class ReactNativePencilKitModule: Module {
 
   // MARK: - Private Methods
 
-  private func setupToolPicker(for _: Int) {
+  private func setupToolPicker(for _: Int, toolConfig: [String: Any]?) {
     guard let canvasView = canvasView else {
       return
     }
@@ -150,11 +150,111 @@ public class ReactNativePencilKitModule: Module {
     toolPickerObserver = ToolPickerObserver()
     toolPicker?.addObserver(toolPickerObserver!)
 
+    // Set default tool if provided
+    if let toolConfig = toolConfig {
+      let defaultTool = createToolWithFallback(from: toolConfig)
+      toolPicker?.selectedTool = defaultTool
+      canvasView.tool = defaultTool
+    }
+
     // Make canvas view first responder
     canvasView.becomeFirstResponder()
 
     // Get the undo manager from canvas view
     undoManager = canvasView.undoManager
+  }
+
+  private func createToolWithFallback(from config: [String: Any]) -> PKTool {
+    // Try to create the requested tool
+    if let tool = createTool(from: config, toolType: config["type"] as? String) {
+      return tool
+    }
+
+    // If requested tool failed, try fallback tool
+    if let fallbackType = config["fallbackTool"] as? String {
+      var fallbackConfig = config
+      fallbackConfig["type"] = fallbackType
+      if let fallbackTool = createTool(from: fallbackConfig, toolType: fallbackType) {
+        return fallbackTool
+      }
+    }
+
+    // Final fallback: use pen
+    let width = config["width"] as? CGFloat ?? 10.0
+    let colorString = config["color"] as? String ?? "#000000"
+    let color = colorFromHexString(colorString)
+    return PKInkingTool(.pen, color: color, width: width)
+  }
+
+  private func createTool(from config: [String: Any], toolType: String?) -> PKTool? {
+    guard let toolType = toolType else {
+      return nil
+    }
+
+    let width = config["width"] as? CGFloat ?? 10.0
+    let colorString = config["color"] as? String ?? "#000000"
+    let color = colorFromHexString(colorString)
+
+    switch toolType.lowercased() {
+    case "pen":
+      return PKInkingTool(.pen, color: color, width: width)
+
+    case "marker":
+      let markerWidth = config["width"] as? CGFloat ?? 20.0
+      return PKInkingTool(.marker, color: color, width: markerWidth)
+
+    case "pencil":
+      return PKInkingTool(.pencil, color: color, width: width)
+
+    case "monoline":
+      if #available(iOS 17.0, *) {
+        return PKInkingTool(.monoline, color: color, width: width)
+      } else {
+        return nil // Not available, will trigger fallback
+      }
+
+    case "fountainpen":
+      if #available(iOS 17.0, *) {
+        return PKInkingTool(.fountainPen, color: color, width: width)
+      } else {
+        return nil // Not available, will trigger fallback
+      }
+
+    case "watercolor":
+      if #available(iOS 17.0, *) {
+        return PKInkingTool(.watercolor, color: color, width: width)
+      } else {
+        return nil // Not available, will trigger fallback
+      }
+
+    case "crayon":
+      if #available(iOS 17.0, *) {
+        return PKInkingTool(.crayon, color: color, width: width)
+      } else {
+        return nil // Not available, will trigger fallback
+      }
+
+    case "reed":
+      if #available(iOS 26.0, *) {
+        return PKInkingTool(.reed, color: color, width: width)
+      } else {
+        return nil // Not available, will trigger fallback
+      }
+
+    case "eraser":
+      let eraserType = config["eraserType"] as? String ?? "vector"
+      if eraserType.lowercased() == "bitmap" {
+        return PKEraserTool(.bitmap)
+      } else {
+        return PKEraserTool(.vector)
+      }
+
+    case "lasso":
+      return PKLassoTool()
+
+    default:
+      return nil // Unknown tool type, will trigger fallback
+    }
   }
 
   private func clearDrawing() {

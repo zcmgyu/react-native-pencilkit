@@ -61,7 +61,14 @@ export default function App() {
   useEffect(() => {
     const setupTimer = setTimeout(() => {
       if (pencilKitRef.current) {
-        pencilKitRef.current.setupToolPicker();
+        // Set watercolor as default tool with marker as fallback
+        // Falls back to: watercolor -> marker -> pen (if watercolor not available on iOS < 17)
+        pencilKitRef.current.setupToolPicker({
+          type: "watercolor",
+          fallbackTool: "marker",
+          width: 20.0,
+          color: "#FF0000",
+        });
       }
     }, 100);
 

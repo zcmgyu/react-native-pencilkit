@@ -14,6 +14,7 @@ PencilKit-powered drawing canvas for **React Native / Expo** with Apple Pencil s
 - **Export drawing** as base64 PNG with `captureDrawing()`
 - **Save / restore strokes** as base64 data with `getCanvasDataAsBase64()` and `setCanvasDataFromBase64()`
 - **Canvas background color** getters/setters and a native **color picker**
+- **Default tool selection** - Set the initial tool when setting up the tool picker
 
 ---
 
@@ -66,7 +67,7 @@ pod install
 ### Basic usage
 
 ```tsx
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
 import {
   PencilKitView,
@@ -81,6 +82,18 @@ import {
 
 export function DrawingScreen() {
   const canvasRef = useRef<PencilKitViewRef>(null);
+
+  useEffect(() => {
+    // Setup tool picker with default tool after component mounts
+    const timer = setTimeout(() => {
+      canvasRef.current?.setupToolPicker({
+        type: "watercolor", // Falls back to pencil on iOS < 17
+        width: 20.0,
+        color: "#000000",
+      });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleDrawStart = (_event: NativeEvent<DrawStartEvent>) => {
     // User started drawing
@@ -141,8 +154,25 @@ const styles = StyleSheet.create({
 The `PencilKitView` exposes a set of async methods through its ref:
 
 ```ts
+export interface ToolConfig {
+  type: 
+    | "pen" 
+    | "marker" 
+    | "pencil" 
+    | "monoline" 
+    | "fountainPen" 
+    | "watercolor" 
+    | "crayon" 
+    | "reed" 
+    | "eraser" 
+    | "lasso";
+  width?: number; // For inking tools, default: 10.0 for most tools, 20.0 for marker
+  color?: string; // Hex color string (e.g., "#000000" or "000000"), default: "#000000"
+  eraserType?: "vector" | "bitmap"; // For eraser tool, default: "vector"
+}
+
 export interface PencilKitViewRef {
-  setupToolPicker(): Promise<void>;
+  setupToolPicker(toolConfig?: ToolConfig): Promise<void>;
   clearDrawing(): Promise<void>;
   undo(): Promise<void>;
   redo(): Promise<void>;
@@ -159,7 +189,7 @@ export interface PencilKitViewRef {
 
 | **Method**                | **Parameters**      | **Return type**      | **Description**                              |
 | ------------------------- | ------------------- | -------------------- | -------------------------------------------- |
-| `setupToolPicker`        | `()`                | `Promise<void>`      | Initialize and show the native tool picker   |
+| `setupToolPicker`        | `(toolConfig?: ToolConfig)` | `Promise<void>`      | Initialize and show the native tool picker with optional default tool   |
 | `clearDrawing`           | `()`                | `Promise<void>`      | Clear all strokes from the canvas            |
 | `undo`                   | `()`                | `Promise<void>`      | Undo the last drawing action                 |
 | `redo`                   | `()`                | `Promise<void>`      | Redo the last undone drawing action          |
@@ -177,7 +207,14 @@ Example usage:
 ```ts
 const ref = useRef<PencilKitViewRef>(null);
 
-// Show the native PencilKit tool picker
+// Show the native PencilKit tool picker with default pen tool
+await ref.current?.setupToolPicker({
+  type: "pen",
+  width: 10.0,
+  color: "#000000"
+});
+
+// Or setup without default tool (uses system default)
 await ref.current?.setupToolPicker();
 
 // Clear all strokes
@@ -186,6 +223,130 @@ await ref.current?.clearDrawing();
 // Export drawing as image (base64 PNG)
 const base64Png = await ref.current?.captureDrawing();
 ```
+
+### Setting Default Tool
+
+You can set a default tool when calling `setupToolPicker()`. The tool selection follows a fallback chain:
+
+1. **Try the requested tool** - If available on the current iOS version, use it
+2. **Try the fallback tool** - If the requested tool is not available and `fallbackTool` is specified, try the fallback tool
+3. **Use pen** - If both the requested tool and fallback tool are unavailable, use pen as the final fallback
+
+This ensures your app works seamlessly across different iOS versions.
+
+```ts
+// Pen tool with custom width and color
+await ref.current?.setupToolPicker({
+  type: "pen",
+  width: 15.0,
+  color: "#FF0000" // Red pen
+});
+
+// Marker tool
+await ref.current?.setupToolPicker({
+  type: "marker",
+  width: 25.0,
+  color: "#00FF00" // Green marker
+});
+
+// Pencil tool
+await ref.current?.setupToolPicker({
+  type: "pencil",
+  width: 8.0,
+  color: "#0000FF" // Blue pencil
+});
+
+// Monoline tool (iOS 17+, falls back to pencil on older versions)
+await ref.current?.setupToolPicker({
+  type: "monoline",
+  width: 12.0,
+  color: "#FF00FF"
+});
+
+// Fountain pen tool (iOS 17+, falls back to pencil on older versions)
+await ref.current?.setupToolPicker({
+  type: "fountainPen",
+  width: 10.0,
+  color: "#000000"
+});
+
+// Watercolor tool (iOS 17+, falls back to pencil on older versions)
+await ref.current?.setupToolPicker({
+  type: "watercolor",
+  width: 20.0,
+  color: "#FF0000"
+});
+
+// Crayon tool (iOS 17+, falls back to pencil on older versions)
+await ref.current?.setupToolPicker({
+  type: "crayon",
+  width: 15.0,
+  color: "#FFA500"
+});
+
+// Reed tool (iOS 26+, falls back to pencil on older versions)
+await ref.current?.setupToolPicker({
+  type: "reed",
+  width: 10.0,
+  color: "#000000"
+});
+
+// Eraser tool (vector or bitmap)
+await ref.current?.setupToolPicker({
+  type: "eraser",
+  eraserType: "vector" // or "bitmap"
+});
+
+// Lasso tool
+await ref.current?.setupToolPicker({
+  type: "lasso"
+});
+
+// Custom fallback tool example
+// Try watercolor first, if not available try marker, if still not available use pen
+await ref.current?.setupToolPicker({
+  type: "watercolor", // Requires iOS 17+
+  fallbackTool: "marker", // Fallback to marker if watercolor not available
+  width: 20.0,
+  color: "#FF0000"
+});
+
+// Another example: Try reed (iOS 26+), fallback to fountainPen (iOS 17+), final fallback to pen
+await ref.current?.setupToolPicker({
+  type: "reed", // Requires iOS 26+
+  fallbackTool: "fountainPen", // Fallback to fountainPen if reed not available
+  width: 10.0,
+  color: "#000000"
+});
+```
+
+**Available tool types:**
+
+**Inking Tools (iOS 13+):**
+- `"pen"` - Pen tool for drawing
+- `"marker"` - Marker tool (typically wider strokes, default width: 20.0)
+- `"pencil"` - Pencil tool (default fallback tool)
+
+**Advanced Inking Tools (iOS 17+):**
+- `"monoline"` - Monoline tool (falls back to pencil on iOS < 17.0)
+- `"fountainPen"` - Fountain pen tool (falls back to pencil on iOS < 17.0)
+- `"watercolor"` - Watercolor brush tool (falls back to pencil on iOS < 17.0)
+- `"crayon"` - Crayon tool (falls back to pencil on iOS < 17.0)
+
+**Future Inking Tools (iOS 26+):**
+- `"reed"` - Reed pen tool (falls back to pencil on iOS < 26.0)
+
+**Other Tools:**
+- `"eraser"` - Eraser tool (requires `eraserType`: `"vector"` or `"bitmap"`)
+- `"lasso"` - Lasso selection tool
+
+**Fallback Behavior:**
+
+- If a tool requires a newer iOS version and is not available, the system will:
+  1. Try the `fallbackTool` if specified
+  2. If `fallbackTool` is not specified or also unavailable, use **pen** as the final fallback
+- This ensures your app works seamlessly across different iOS versions
+- You can customize the fallback chain by specifying `fallbackTool` in the `ToolConfig`
 
 ---
 
@@ -224,6 +385,7 @@ export interface PencilKitViewProps {
 
 This repo includes an Expo example demonstrating:
 
+- **Default tool selection** - Uses watercolor as the default tool (with automatic fallback to pencil on iOS < 17)
 - **Toolbar controls** (undo, redo, clear, color picker)
 - **Background image selection** using `expo-image-picker`
 - **Saving canvas data** to base64 and sharing an exported PNG
