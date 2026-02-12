@@ -169,6 +169,7 @@ export interface ToolConfig {
   width?: number; // For inking tools, default: 10.0 for most tools, 20.0 for marker
   color?: string; // Hex color string (e.g., "#000000" or "000000"), default: "#000000"
   eraserType?: "vector" | "bitmap"; // For eraser tool, default: "vector"
+  fallbackTool?: ToolType; // Optional fallback tool if the requested tool is not available. If not specified or unavailable, defaults to pen
 }
 
 export interface PencilKitViewRef {
@@ -256,39 +257,56 @@ await ref.current?.setupToolPicker({
   color: "#0000FF" // Blue pencil
 });
 
-// Monoline tool (iOS 17+, falls back to pencil on older versions)
+// Monoline tool (iOS 17+, automatically falls back to pen on iOS < 17)
 await ref.current?.setupToolPicker({
   type: "monoline",
   width: 12.0,
   color: "#FF00FF"
 });
 
-// Fountain pen tool (iOS 17+, falls back to pencil on older versions)
+// Fountain pen tool (iOS 17+, automatically falls back to pen on iOS < 17)
 await ref.current?.setupToolPicker({
   type: "fountainPen",
   width: 10.0,
   color: "#000000"
 });
 
-// Watercolor tool (iOS 17+, falls back to pencil on older versions)
+// Watercolor tool (iOS 17+, automatically falls back to pen on iOS < 17)
 await ref.current?.setupToolPicker({
   type: "watercolor",
   width: 20.0,
   color: "#FF0000"
 });
 
-// Crayon tool (iOS 17+, falls back to pencil on older versions)
+// Watercolor with custom fallback to marker (iOS 17+, falls back to marker on iOS < 17)
+await ref.current?.setupToolPicker({
+  type: "watercolor", // Requires iOS 17+
+  fallbackTool: "marker", // Use marker instead of pen if watercolor not available
+  width: 20.0,
+  color: "#FF0000"
+});
+
+// Crayon tool (iOS 17+, automatically falls back to pen on iOS < 17)
 await ref.current?.setupToolPicker({
   type: "crayon",
   width: 15.0,
   color: "#FFA500"
 });
 
-// Reed tool (iOS 26+, falls back to pencil on older versions)
+// Reed tool (iOS 26+, automatically falls back to pen on iOS < 26)
 await ref.current?.setupToolPicker({
   type: "reed",
   width: 10.0,
   color: "#000000"
+});
+
+// Reed with multi-level fallback (iOS 26+ → iOS 17+ → pen)
+await ref.current?.setupToolPicker({
+  type: "reed", // Requires iOS 26+
+  fallbackTool: "fountainPen", // Fallback to fountainPen (iOS 17+) if reed not available
+  width: 10.0,
+  color: "#000000"
+  // Final fallback to pen happens automatically if fountainPen also unavailable
 });
 
 // Eraser tool (vector or bitmap)
@@ -302,22 +320,6 @@ await ref.current?.setupToolPicker({
   type: "lasso"
 });
 
-// Custom fallback tool example
-// Try watercolor first, if not available try marker, if still not available use pen
-await ref.current?.setupToolPicker({
-  type: "watercolor", // Requires iOS 17+
-  fallbackTool: "marker", // Fallback to marker if watercolor not available
-  width: 20.0,
-  color: "#FF0000"
-});
-
-// Another example: Try reed (iOS 26+), fallback to fountainPen (iOS 17+), final fallback to pen
-await ref.current?.setupToolPicker({
-  type: "reed", // Requires iOS 26+
-  fallbackTool: "fountainPen", // Fallback to fountainPen if reed not available
-  width: 10.0,
-  color: "#000000"
-});
 ```
 
 **Available tool types:**
@@ -342,11 +344,25 @@ await ref.current?.setupToolPicker({
 
 **Fallback Behavior:**
 
-- If a tool requires a newer iOS version and is not available, the system will:
-  1. Try the `fallbackTool` if specified
-  2. If `fallbackTool` is not specified or also unavailable, use **pen** as the final fallback
-- This ensures your app works seamlessly across different iOS versions
-- You can customize the fallback chain by specifying `fallbackTool` in the `ToolConfig`
+The fallback mechanism ensures your app works across different iOS versions. When configuring a tool:
+
+1. **Try the requested tool** - If available on the current iOS version, use it
+2. **Try the fallback tool** - If the requested tool is unavailable and `fallbackTool` is specified, try the fallback tool
+3. **Use pen** - If both the requested tool and fallback tool are unavailable, use **pen** as the final fallback
+
+**When to use `fallbackTool`:**
+- Use newer tools (iOS 17+ or iOS 26+) but need compatibility with older iOS versions
+- Prefer a specific alternative tool instead of the default pen fallback
+- Match tool characteristics (e.g., `watercolor` → `marker` for wide strokes)
+
+**iOS Version Requirements:**
+
+| Tool | Minimum iOS Version | Recommended Fallback |
+|------|-------------------|---------------------|
+| `pen`, `marker`, `pencil` | iOS 13+ | N/A (always available) |
+| `monoline`, `fountainPen`, `watercolor`, `crayon` | iOS 17+ | `"marker"` or `"pen"` |
+| `reed` | iOS 26+ | `"fountainPen"`, `"marker"`, or `"pen"` |
+| `eraser`, `lasso` | iOS 13+ | N/A (always available) |
 
 ---
 
