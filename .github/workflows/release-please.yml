@@ -2,7 +2,7 @@ on:
   push:
     branches:
       - main
-      - fix-release-npm
+      - ci-fix-release-please
 
 name: release-please
 
@@ -10,6 +10,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  id-token: write
 
 jobs:
   release-please:
