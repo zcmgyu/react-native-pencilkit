@@ -2,7 +2,6 @@ on:
   push:
     branches:
       - main
-      - fix-release-npm
 
 name: release-please
 
@@ -10,18 +9,17 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  id-token: write
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
           release-type: node
+          target-branch: ${{ github.ref_name }}
       # The logic below handles the npm publication:
       - uses: actions/checkout@v6
         # these if statements ensure that a publication only occurs when
