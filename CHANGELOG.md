@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/zcmgyu/react-native-pencilkit/compare/v1.0.0...v1.1.0) (2026-02-16)
+
+
+### Features
+
+* capture image with drawing ([50f2828](https://github.com/zcmgyu/react-native-pencilkit/commit/50f2828c1e632a36e64d2a4f614707f28df749b3))
+
 ## 1.0.0 (2026-02-12)
 
 
