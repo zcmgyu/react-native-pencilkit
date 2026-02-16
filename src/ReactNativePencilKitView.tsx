@@ -99,6 +99,19 @@ export const PencilKitView = React.forwardRef<
         }
         return "";
       },
+      captureImageWithDrawing: async (): Promise<string> => {
+        if (
+          Platform.OS === "ios" &&
+          ReactNativePencilKit &&
+          viewRef.current
+        ) {
+          const viewTag = findNodeHandle(viewRef.current);
+          if (viewTag) {
+            return await ReactNativePencilKit.captureImageWithDrawing(viewTag);
+          }
+        }
+        return "";
+      },
       getCanvasDataAsBase64: async (): Promise<string> => {
         if (
           Platform.OS === "ios" &&
