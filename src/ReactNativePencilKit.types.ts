@@ -101,6 +101,7 @@ export interface PencilKitViewRef {
   undo(): Promise<void>;
   redo(): Promise<void>;
   captureDrawing(): Promise<string>;
+  captureImageWithDrawing(): Promise<string>;
   getCanvasDataAsBase64(): Promise<string>;
   setCanvasDataFromBase64(base64String: string): Promise<boolean>;
   canUndo(): Promise<boolean>;

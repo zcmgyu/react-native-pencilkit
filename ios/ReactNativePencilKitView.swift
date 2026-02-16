@@ -93,6 +93,7 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
 
     if superview != nil {
       ReactNativePencilKitView.moduleInstance?.registerCanvasView(canvasView)
+      ReactNativePencilKitView.moduleInstance?.registerPencilKitView(self)
     } else {
       ReactNativePencilKitView.moduleInstance?.unregisterCanvasView()
     }
@@ -195,6 +196,21 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
   }
 
   // MARK: - Helper Methods
+
+  func captureImageWithDrawing() -> String {
+    // Capture the entire contentView which includes both background image and canvas
+    let renderer = UIGraphicsImageRenderer(bounds: contentView.bounds)
+    let image = renderer.image { _ in
+      contentView.drawHierarchy(in: contentView.bounds, afterScreenUpdates: true)
+    }
+
+    guard let imageData = image.pngData() else {
+      return ""
+    }
+
+    let base64String = imageData.base64EncodedString()
+    return base64String
+  }
 
   private func emitUndoRedoStateChanges() {
     guard let undoManager = canvasView.undoManager else { return }
