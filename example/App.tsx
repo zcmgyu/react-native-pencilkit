@@ -193,6 +193,25 @@ export default function App() {
     }
   };
 
+  const handleLoadCanvasData = async () => {
+    if (pencilKitRef.current && savedCanvasData) {
+      try {
+        const ok = await pencilKitRef.current.setCanvasDataFromBase64(
+          savedCanvasData
+        );
+        if (ok) {
+          Alert.alert("Loaded", "Canvas data restored from saved data.");
+        } else {
+          Alert.alert("Error", "Failed to load canvas data");
+        }
+      } catch (_) {
+        Alert.alert("Error", "Failed to load canvas data");
+      }
+    } else if (!savedCanvasData) {
+      Alert.alert("No data", "Save canvas data first, then load.");
+    }
+  };
+
   const handleExportImage = async () => {
     if (pencilKitRef.current) {
       try {
@@ -326,23 +345,37 @@ export default function App() {
               <FontAwesome5 name="save" size={16} color={COLORS.surface} />
               <Text style={styles.primaryButtonText}>Save data</Text>
             </Pressable>
+            <Pressable
+              style={[
+                styles.primaryButton,
+                !savedCanvasData && styles.toolButtonDisabled,
+              ]}
+              onPress={handleLoadCanvasData}
+              disabled={!savedCanvasData}
+            >
+              <FontAwesome5 name="folder-open" size={16} color={COLORS.surface} />
+              <Text style={styles.primaryButtonText}>Load data</Text>
+            </Pressable>
+          </View>
+          <View style={[styles.row, styles.rowSpaced]}>
             <Pressable style={styles.primaryButton} onPress={handleExportImage}>
               <FontAwesome5 name="share-alt" size={16} color={COLORS.surface} />
               <Text style={styles.primaryButtonText}>Share image</Text>
             </Pressable>
           </View>
-          <View style={[styles.row, { marginTop: 10 }]}>
+          <View style={[styles.row, styles.rowSpaced]}>
             <Pressable
               style={styles.primaryButton}
               onPress={handleSaveImageWithDrawing}
             >
               <FontAwesome5 name="image" size={16} color={COLORS.surface} />
-              <Text style={styles.primaryButtonText}>Save image + drawing</Text>
+              <Text style={styles.primaryButtonText}>Save image & drawing</Text>
             </Pressable>
           </View>
           {savedCanvasData ? (
             <Text style={styles.hint}>
-              Saved data: {Math.round(savedCanvasData.length / 1024)} KB
+              Saved data: {Math.round(savedCanvasData.length / 1024)} KB — tap
+              "Load data" to restore strokes
             </Text>
           ) : null}
         </View>
@@ -541,6 +574,9 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     gap: 10,
+  },
+  rowSpaced: {
+    marginTop: 10,
   },
   primaryButton: {
     flex: 1,
