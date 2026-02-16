@@ -208,25 +208,6 @@ export default function App() {
     }
   };
 
-  const handleSaveImageWithDrawing = async () => {
-    if (pencilKitRef.current) {
-      try {
-        const base64Image = await pencilKitRef.current.captureImageWithDrawing();
-        await Share.share({
-          title: "PencilKit Image + Drawing",
-          message: "Check out my image with drawing!",
-          url: `data:image/png;base64,${base64Image}`,
-        });
-        Alert.alert(
-          "Saved",
-          `Image with drawing saved (${Math.round(base64Image.length / 1024)} KB)`
-        );
-      } catch (_) {
-        Alert.alert("Error", "Failed to save image with drawing");
-      }
-    }
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -329,15 +310,6 @@ export default function App() {
             <Pressable style={styles.primaryButton} onPress={handleExportImage}>
               <FontAwesome5 name="share-alt" size={16} color={COLORS.surface} />
               <Text style={styles.primaryButtonText}>Share image</Text>
-            </Pressable>
-          </View>
-          <View style={[styles.row, { marginTop: 10 }]}>
-            <Pressable
-              style={styles.primaryButton}
-              onPress={handleSaveImageWithDrawing}
-            >
-              <FontAwesome5 name="image" size={16} color={COLORS.surface} />
-              <Text style={styles.primaryButtonText}>Save image + drawing</Text>
             </Pressable>
           </View>
           {savedCanvasData ? (
