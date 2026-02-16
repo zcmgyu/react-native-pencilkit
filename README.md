@@ -12,7 +12,6 @@ PencilKit-powered drawing canvas for **React Native / Expo** with Apple Pencil s
 - **Background image support** via `imagePath={{ uri }}` (e.g. photos, templates)
 - **Undo / redo** with live `canUndo` / `canRedo` events
 - **Export drawing** as base64 PNG with `captureDrawing()`
-- **Export image + drawing** as base64 PNG with `captureImageWithDrawing()` - captures both background image and drawings together
 - **Save / restore strokes** as base64 data with `getCanvasDataAsBase64()` and `setCanvasDataFromBase64()`
 - **Canvas background color** getters/setters and a native **color picker**
 - **Default tool selection** - Set the initial tool when setting up the tool picker
@@ -178,8 +177,7 @@ export interface PencilKitViewRef {
   clearDrawing(): Promise<void>;
   undo(): Promise<void>;
   redo(): Promise<void>;
-  captureDrawing(): Promise<string>; // base64 PNG (drawing only)
-  captureImageWithDrawing(): Promise<string>; // base64 PNG (background image + drawing)
+  captureDrawing(): Promise<string>; // base64 PNG
   getCanvasDataAsBase64(): Promise<string>;
   setCanvasDataFromBase64(base64String: string): Promise<boolean>;
   canUndo(): Promise<boolean>;
@@ -196,8 +194,7 @@ export interface PencilKitViewRef {
 | `clearDrawing`           | `()`                | `Promise<void>`      | Clear all strokes from the canvas            |
 | `undo`                   | `()`                | `Promise<void>`      | Undo the last drawing action                 |
 | `redo`                   | `()`                | `Promise<void>`      | Redo the last undone drawing action          |
-| `captureDrawing`         | `()`                | `Promise<string>`    | Capture the canvas drawing as a base64 PNG image (drawing only)     |
-| `captureImageWithDrawing`| `()`                | `Promise<string>`    | Capture the background image + drawing as a base64 PNG image (complete visual output) |
+| `captureDrawing`         | `()`                | `Promise<string>`    | Capture the canvas as a base64 PNG image     |
 | `getCanvasDataAsBase64`  | `()`                | `Promise<string>`    | Get the current drawing data as base64       |
 | `setCanvasDataFromBase64`| `base64: string`    | `Promise<boolean>`   | Load a drawing from base64 data              |
 | `canUndo`                | `()`                | `Promise<boolean>`   | Check if undo is currently available         |
@@ -224,12 +221,8 @@ await ref.current?.setupToolPicker();
 // Clear all strokes
 await ref.current?.clearDrawing();
 
-// Export drawing as image (base64 PNG - drawing only)
+// Export drawing as image (base64 PNG)
 const base64Png = await ref.current?.captureDrawing();
-
-// Export image + drawing as base64 PNG (includes background image if set)
-const base64ImageWithDrawing = await ref.current?.captureImageWithDrawing();
-// Use it: `data:image/png;base64,${base64ImageWithDrawing}`
 ```
 
 ### Setting Default Tool
@@ -412,7 +405,6 @@ This repo includes an Expo example demonstrating:
 - **Toolbar controls** (undo, redo, clear, color picker)
 - **Background image selection** using `expo-image-picker`
 - **Saving canvas data** to base64 and sharing an exported PNG
-- **Saving image + drawing** as base64 using `captureImageWithDrawing()`
 
 To run it:
 
