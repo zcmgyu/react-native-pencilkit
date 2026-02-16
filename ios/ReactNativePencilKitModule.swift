@@ -6,6 +6,7 @@ import UIKit
 public class ReactNativePencilKitModule: Module {
   // Single canvas view approach like the working example
   private var canvasView: PKCanvasView?
+  private var pencilKitView: ReactNativePencilKitView?
   private var toolPicker: PKToolPicker?
   private var undoManager: UndoManager?
   private var colorPickerViewController: UIColorPickerViewController?
@@ -71,6 +72,13 @@ public class ReactNativePencilKitModule: Module {
       }
     }
 
+    // Capture image with drawing as base64
+    AsyncFunction("captureImageWithDrawing") { (_: Int) -> String in
+      return await MainActor.run {
+        self.captureImageWithDrawing()
+      }
+    }
+
     // Get canvas data as base64
     AsyncFunction("getCanvasDataAsBase64") { (_: Int) -> String in
       return await MainActor.run {
@@ -127,8 +135,13 @@ public class ReactNativePencilKitModule: Module {
     canvasView = canvas
   }
 
+  func registerPencilKitView(_ view: ReactNativePencilKitView) {
+    pencilKitView = view
+  }
+
   func unregisterCanvasView() {
     canvasView = nil
+    pencilKitView = nil
     toolPicker = nil
     undoManager = nil
   }
@@ -297,6 +310,14 @@ public class ReactNativePencilKitModule: Module {
 
     let base64String = imageData.base64EncodedString()
     return base64String
+  }
+
+  private func captureImageWithDrawing() -> String {
+    guard let pencilKitView = pencilKitView else {
+      return ""
+    }
+
+    return pencilKitView.captureImageWithDrawing()
   }
 
   private func getCanvasDataAsBase64() -> String {
