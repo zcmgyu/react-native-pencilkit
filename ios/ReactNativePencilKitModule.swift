@@ -287,25 +287,26 @@ public class ReactNativePencilKitModule: Module {
   }
 
   private func clearDrawing() {
+    // Clear both canvas and committed strokes
     canvasView?.drawing = PKDrawing()
+    pencilKitView?.clearAllCommitted()
   }
 
   private func undoDrawing() {
-    // Try native undo first (current in-progress canvas)
+    // In boundary mode, always use committed stroke undo
+    // (canvas is always empty between strokes, native undo just undoes the commit clear)
+    if pencilKitView?.undoCommittedStroke() == true { return }
+    // Fall back to native undo (non-boundary mode)
     if let undoManager = undoManager, undoManager.canUndo {
       undoManager.undo()
-      return
     }
-    // Fall back to committed stroke undo
-    pencilKitView?.undoCommittedStroke()
   }
 
   private func redoDrawing() {
-    guard let undoManager = undoManager else {
-      return
-    }
-
-    if undoManager.canRedo {
+    // Try committed redo first
+    if pencilKitView?.redoCommittedStroke() == true { return }
+    // Fall back to native redo
+    if let undoManager = undoManager, undoManager.canRedo {
       undoManager.redo()
     }
   }
@@ -365,16 +366,13 @@ public class ReactNativePencilKitModule: Module {
   }
 
   private func canPerformUndo() -> Bool {
-    if let undoManager = undoManager, undoManager.canUndo { return true }
-    return pencilKitView?.canUndoCommitted ?? false
+    if pencilKitView?.canUndoCommitted == true { return true }
+    return undoManager?.canUndo ?? false
   }
 
   private func canPerformRedo() -> Bool {
-    guard let undoManager = undoManager else {
-      return false
-    }
-
-    return undoManager.canRedo
+    if pencilKitView?.canRedoCommitted == true { return true }
+    return undoManager?.canRedo ?? false
   }
 
   private func showColorPicker() {

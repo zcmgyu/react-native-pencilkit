@@ -329,8 +329,9 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
           let zoneMask = canvasMask(for: currentRegionId, builder: builder)
     else { return }
 
-    // Save coloredLayer state for undo
+    // Save coloredLayer state for undo, clear redo (new action invalidates redo)
     coloredSnapshots.append(coloredLayer?.image)
+    redoSnapshots = []
 
     // Render stroke from PKDrawing (reliable, no view rendering)
     let size = canvasView.bounds.size
@@ -371,15 +372,38 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
 
   // MARK: - Undo
 
+  private var redoSnapshots: [UIImage?] = []  // Redo stack
+
   var canUndoCommitted: Bool {
-    return !coloredSnapshots.isEmpty
+    return boundaryColoringEnabled && !coloredSnapshots.isEmpty
+  }
+
+  var canRedoCommitted: Bool {
+    return boundaryColoringEnabled && !redoSnapshots.isEmpty
   }
 
   func undoCommittedStroke() -> Bool {
-    guard !coloredSnapshots.isEmpty else { return false }
+    guard boundaryColoringEnabled, !coloredSnapshots.isEmpty else { return false }
+    redoSnapshots.append(coloredLayer?.image)
     coloredLayer?.image = coloredSnapshots.removeLast()
     emitUndoRedoStateChanges()
     return true
+  }
+
+  func redoCommittedStroke() -> Bool {
+    guard boundaryColoringEnabled, !redoSnapshots.isEmpty else { return false }
+    coloredSnapshots.append(coloredLayer?.image)
+    coloredLayer?.image = redoSnapshots.removeLast()
+    emitUndoRedoStateChanges()
+    return true
+  }
+
+  func clearAllCommitted() {
+    coloredSnapshots = []
+    redoSnapshots = []
+    coloredLayer?.image = nil
+    activeRegionIds = []
+    emitUndoRedoStateChanges()
   }
 
   private func clearBoundaryImage() {
@@ -396,6 +420,7 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     coloredLayer = nil
     activeRegionIds = []
     coloredSnapshots = []
+    redoSnapshots = []
     zoneMaskCache = [:]
     previousStrokeCount = 0
   }
@@ -559,8 +584,9 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
 
   private func emitUndoRedoStateChanges() {
     let nativeUndo = canvasView.undoManager?.canUndo ?? false
+    let nativeRedo = canvasView.undoManager?.canRedo ?? false
     onCanUndoChanged(["canUndo": nativeUndo || canUndoCommitted])
-    onCanRedoChanged(["canRedo": canvasView.undoManager?.canRedo ?? false])
+    onCanRedoChanged(["canRedo": nativeRedo || canRedoCommitted])
   }
 
   // Override to allow becoming first responder

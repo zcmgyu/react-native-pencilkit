@@ -27,6 +27,7 @@ import {
   Switch,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
 
@@ -315,7 +316,7 @@ export default function App() {
                 </Text>
               </View>
               <View style={styles.toolbarActions}>
-                <Pressable
+                <TouchableOpacity
                   style={[
                     styles.toolButton,
                     !canUndoState && styles.toolButtonDisabled,
@@ -325,8 +326,8 @@ export default function App() {
                   hitSlop={HIT_SLOP}
                 >
                   <FontAwesome5 name="undo" size={14} color={COLORS.surface} />
-                </Pressable>
-                <Pressable
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={[
                     styles.toolButton,
                     !canRedoState && styles.toolButtonDisabled,
@@ -336,15 +337,15 @@ export default function App() {
                   hitSlop={HIT_SLOP}
                 >
                   <FontAwesome5 name="redo" size={14} color={COLORS.surface} />
-                </Pressable>
-                <Pressable
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={styles.toolButton}
                   onPress={handleShowColorPicker}
                   hitSlop={HIT_SLOP}
                 >
                   <FontAwesome5 name="palette" size={14} color={COLORS.surface} />
-                </Pressable>
-                <Pressable
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={styles.toolButton}
                   onPress={handleClear}
                   hitSlop={HIT_SLOP}
@@ -354,7 +355,7 @@ export default function App() {
                     size={14}
                     color={COLORS.surface}
                   />
-                </Pressable>
+                </TouchableOpacity>
               </View>
             </View>
             <View style={styles.canvasWrapper}>
