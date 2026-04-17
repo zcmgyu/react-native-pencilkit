@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/zcmgyu/react-native-pencilkit/compare/v1.1.0...v1.2.0) (2026-04-17)
+
+
+### Features
+
+* boundary coloring with region detection  ([#15](https://github.com/zcmgyu/react-native-pencilkit/issues/15)) ([470bac8](https://github.com/zcmgyu/react-native-pencilkit/commit/470bac8ac7067e1bd3731aa86f009f84acf99df8))
+
 ## [1.1.0](https://github.com/zcmgyu/react-native-pencilkit/compare/v1.0.0...v1.1.0) (2026-02-16)
 
 
