@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boundary Coloring — How It Works</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; line-height: 1.6; }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px; }
+  h1 { color: #58a6ff; font-size: 28px; margin-bottom: 8px; }
+  h2 { color: #79c0ff; font-size: 20px; margin: 40px 0 16px; border-bottom: 1px solid #21262d; padding-bottom: 8px; }
+  h3 { color: #d2a8ff; font-size: 16px; margin: 24px 0 8px; }
+  p, li { color: #c9d1d9; font-size: 15px; margin-bottom: 8px; }
+  ul { padding-left: 24px; margin-bottom: 16px; }
+  ol { padding-left: 24px; margin-bottom: 16px; }
+  code { background: #161b22; color: #79c0ff; padding: 2px 6px; border-radius: 4px; font-size: 13px; word-break: break-all; }
+  .subtitle { color: #8b949e; font-size: 15px; margin-bottom: 32px; }
+  .card { background: #161b22; border: 1px solid #21262d; border-radius: 12px; padding: 24px; margin: 16px 0; }
+
+  /* Mobile responsive */
+  @media (max-width: 600px) {
+    .container { padding: 16px 12px; }
+    h1 { font-size: 22px; }
+    h2 { font-size: 17px; margin: 28px 0 12px; }
+    h3 { font-size: 14px; margin: 16px 0 6px; }
+    p, li { font-size: 14px; }
+    .card { padding: 14px; margin: 10px 0; }
+    .subtitle { font-size: 13px; }
+
+    /* Pipeline diagrams → vertical on mobile */
+    .diagram { flex-direction: column; align-items: stretch; }
+    .diagram-box { min-width: auto; }
+    .diagram-arrow { transform: rotate(90deg); text-align: center; margin: 4px 0; }
+
+    /* Tables scroll horizontally */
+    table { font-size: 12px; display: block; overflow-x: auto; }
+    th, td { padding: 6px 8px; white-space: nowrap; }
+
+    /* Interactive demo → stack vertically */
+    .demo-container { flex-direction: column; }
+    .demo-canvas-wrap { width: 100%; max-width: 300px; height: 280px; }
+    .btn { padding: 10px 16px; font-size: 14px; }
+    .color-swatch { width: 36px; height: 36px; }
+
+    /* 3D layer stack → smaller scene, stacked layout */
+    .hierarchy-layout { flex-direction: column; }
+    #scene3d { height: 500px !important; }
+    .layer3d-content { width: 65vw !important; height: 26vw !important; }
+    .layer3d-label { font-size: 9px !important; }
+    .layer3d-index { font-size: 10px !important; }
+    .layer3d-note { font-size: 8px !important; }
+    .layer3d-content svg { transform: scale(0.75); transform-origin: top left; }
+
+    /* Before/after SVG diagrams */
+    .card svg { max-width: 100%; height: auto; }
+
+    /* CCL canvas */
+    #cclCanvas { max-width: 100%; height: auto !important; }
+
+    /* Step 5 canvas mapping boxes */
+    .card > div[style*="display:flex"] { flex-direction: column !important; align-items: center !important; }
+  }
+  .card-green { border-color: #238636; }
+  .card-red { border-color: #da3633; }
+  .card-blue { border-color: #1f6feb; }
+  .card-yellow { border-color: #9e6a03; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; margin-right: 6px; }
+  .badge-green { background: #238636; color: #fff; }
+  .badge-red { background: #da3633; color: #fff; }
+  .badge-blue { background: #1f6feb; color: #fff; }
+  .badge-yellow { background: #9e6a03; color: #fff; }
+
+  /* Code blocks & pre */
+  pre { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* Animation */
+  .timeline { position: relative; padding-left: 32px; }
+  .timeline::before { content: ''; position: absolute; left: 12px; top: 0; bottom: 0; width: 2px; background: #21262d; }
+  .step { position: relative; margin-bottom: 24px; }
+  .step::before { content: ''; position: absolute; left: -26px; top: 4px; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #30363d; background: #0d1117; }
+  .step.active::before { border-color: #58a6ff; background: #58a6ff; }
+  .step.done::before { border-color: #238636; background: #238636; }
+
+  /* Interactive demo */
+  .demo-container { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+  .demo-canvas-wrap { position: relative; width: 300px; height: 300px; border: 2px solid #30363d; border-radius: 8px; overflow: hidden; cursor: crosshair; }
+  .demo-canvas-wrap canvas { position: absolute; top: 0; left: 0; }
+  .demo-controls { flex: 1; min-width: 200px; }
+  .btn { display: inline-block; padding: 8px 16px; border-radius: 8px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; cursor: pointer; font-size: 13px; margin: 4px; }
+  .btn:hover { background: #30363d; }
+  .btn.active { border-color: #58a6ff; color: #58a6ff; }
+  .color-swatch { display: inline-block; width: 28px; height: 28px; border-radius: 6px; border: 2px solid #30363d; cursor: pointer; vertical-align: middle; margin: 2px; }
+  .color-swatch.selected { border-color: #58a6ff; box-shadow: 0 0 0 2px #58a6ff44; }
+  .log { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 12px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; max-height: 160px; overflow-y: auto; margin-top: 12px; }
+  .log-entry { margin-bottom: 2px; }
+  .log-zone { color: #58a6ff; }
+  .log-commit { color: #3fb950; }
+  .log-mask { color: #d2a8ff; }
+  .log-undo { color: #d29922; }
+
+  /* Diagram */
+  .diagram { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; margin: 16px 0; }
+  .diagram-box { background: #21262d; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; text-align: center; font-size: 13px; min-width: 120px; }
+  .diagram-box.highlight { border-color: #58a6ff; }
+  .diagram-arrow { color: #484f58; font-size: 20px; }
+  .diagram-label { font-size: 11px; color: #8b949e; margin-top: 4px; }
+
+  /* Failed approaches table */
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  th { background: #161b22; color: #8b949e; text-align: left; padding: 10px 12px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #21262d; }
+  td { padding: 10px 12px; border-bottom: 1px solid #21262d; font-size: 13px; vertical-align: top; }
+  tr:hover td { background: #161b2266; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Boundary Coloring</h1>
+<p class="subtitle">How the "always-empty canvas" architecture works in React Native PencilKit</p>
+
+<!-- ─── OVERVIEW ─── -->
+<h2>Overview</h2>
+<p>Boundary coloring confines each stroke to the zone where the user touches — like a coloring book app. The user picks up color from anywhere, but it only appears inside the touched region's boundaries.</p>
+
+<div class="diagram">
+  <div class="diagram-box">
+    <strong>Coloring Page</strong>
+    <div class="diagram-label">Black outlines on white</div>
+  </div>
+  <div class="diagram-arrow">&rarr;</div>
+  <div class="diagram-box">
+    <strong>Region Map</strong>
+    <div class="diagram-label">Each zone gets an ID</div>
+  </div>
+  <div class="diagram-arrow">&rarr;</div>
+  <div class="diagram-box highlight">
+    <strong>Zone Masks</strong>
+    <div class="diagram-label">Per-zone alpha images</div>
+  </div>
+  <div class="diagram-arrow">&rarr;</div>
+  <div class="diagram-box">
+    <strong>Clipped Drawing</strong>
+    <div class="diagram-label">Strokes stay in zone</div>
+  </div>
+</div>
+
+<!-- ─── VIEW HIERARCHY ─── -->
+<h2>View Hierarchy (3D Layer Stack)</h2>
+<p>Each layer sits on top of the previous one. The user sees through all transparent layers at once. Click a layer or use the slider to explore. Drag to rotate.</p>
+
+<div class="hierarchy-layout" style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; margin:20px 0;">
+  <!-- 3D scene -->
+  <div style="flex-shrink:0; width:100%; max-width:420px;">
+    <div id="scene3d" style="width:100%; height:700px; perspective:800px; cursor:grab;">
+      <div id="stack3d" style="width:100%; height:100%; transform-style:preserve-3d; transition:transform 0.15s ease-out; transform:rotateX(50deg) rotateZ(-15deg);">
+
+        <!-- Layer 3: debug overlay (TOP — closest to user) -->
+        <div class="layer3d" data-layer="3" style="--y:-120px; --color:#d29922;">
+          <div class="layer3d-face">
+            <div class="layer3d-content" style="background:rgba(210,153,34,0.08);">
+              <div class="layer3d-label" style="color:#d29922;">debugMaskOverlay</div>
+              <svg width="260" height="80" style="position:absolute;top:24px;left:10px;">
+                <circle cx="70" cy="35" r="28" fill="#d2992218" stroke="#d2992244" stroke-width="1"/>
+                <circle cx="170" cy="30" r="22" fill="#d2992218" stroke="#d2992244" stroke-width="1"/>
+                <rect x="45" y="55" width="55" height="20" rx="3" fill="#d2992218" stroke="#d2992244" stroke-width="1"/>
+              </svg>
+              <div class="layer3d-index">3</div>
+              <div class="layer3d-note">debug only</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Layer 2: canvasView -->
+        <div class="layer3d" data-layer="2" style="--y:-40px; --color:#58a6ff;">
+          <div class="layer3d-face">
+            <div class="layer3d-content" style="background:rgba(88,166,255,0.05);">
+              <div class="layer3d-label" style="color:#58a6ff;">canvasView (PKCanvasView)</div>
+              <svg width="260" height="80" style="position:absolute;top:24px;left:10px;">
+                <path d="M30,60 Q70,10 120,45 T220,25" stroke="#ef4444" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.8"/>
+                <rect x="40" y="8" width="90" height="62" rx="4" fill="none" stroke="#58a6ff44" stroke-width="1.5" stroke-dasharray="5,4"/>
+                <text x="85" y="42" fill="#58a6ff66" font-size="9" text-anchor="middle">mask clip</text>
+              </svg>
+              <div class="layer3d-index">2</div>
+              <div class="layer3d-note">live stroke + mask</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Layer 1: coloredLayer -->
+        <div class="layer3d" data-layer="1" style="--y:40px; --color:#3fb950;">
+          <div class="layer3d-face">
+            <div class="layer3d-content" style="background:rgba(63,185,80,0.03);">
+              <div class="layer3d-label" style="color:#3fb950;">coloredLayer (UIImageView)</div>
+              <svg width="260" height="80" style="position:absolute;top:22px;left:10px;">
+                <circle cx="65" cy="32" r="25" fill="#ef444455"/>
+                <circle cx="175" cy="28" r="20" fill="#3b82f655"/>
+                <rect x="40" y="52" width="50" height="18" rx="3" fill="#22c55e44"/>
+                <rect x="150" y="48" width="40" height="24" rx="3" fill="#f59e0b44"/>
+              </svg>
+              <div class="layer3d-index">1</div>
+              <div class="layer3d-note">committed strokes</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Layer 0: backgroundImageView (BOTTOM — furthest from user) -->
+        <div class="layer3d" data-layer="0" style="--y:120px; --color:#d2a8ff;">
+          <div class="layer3d-face">
+            <div class="layer3d-content" style="background:#f0f0f0;">
+              <div class="layer3d-label" style="color:#9333ea;">backgroundImageView</div>
+              <svg width="260" height="80" style="position:absolute;top:22px;left:10px;">
+                <circle cx="65" cy="32" r="28" fill="none" stroke="#444" stroke-width="2.5"/>
+                <circle cx="175" cy="28" r="22" fill="none" stroke="#444" stroke-width="2.5"/>
+                <rect x="38" y="55" width="55" height="22" rx="3" fill="none" stroke="#444" stroke-width="2.5"/>
+                <rect x="148" y="50" width="45" height="28" rx="3" fill="none" stroke="#444" stroke-width="2.5"/>
+              </svg>
+              <div class="layer3d-index">0</div>
+              <div class="layer3d-note">coloring page</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <!-- TOP / BOTTOM legend below the stack -->
+    <div style="display:flex; justify-content:center; align-items:center; gap:12px; margin-top:4px; padding:8px 16px; background:#161b22; border-radius:8px;">
+      <div style="display:flex; align-items:center; gap:6px;">
+        <span style="color:#d29922; font-size:18px;">&#9650;</span>
+        <span style="color:#d29922; font-size:12px; font-weight:600;">TOP</span>
+        <span style="color:#8b949e; font-size:11px;">user sees this / receives touches</span>
+      </div>
+      <div style="width:1px; height:16px; background:#30363d;"></div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <span style="color:#d2a8ff; font-size:18px;">&#9660;</span>
+        <span style="color:#d2a8ff; font-size:12px; font-weight:600;">BOTTOM</span>
+        <span style="color:#8b949e; font-size:11px;">behind everything</span>
+      </div>
+    </div>
+    <!-- Spread slider -->
+    <div style="display:flex; align-items:center; gap:8px; margin-top:8px; padding:0 20px;">
+      <span style="color:#484f58; font-size:11px;">Compact</span>
+      <input type="range" id="spreadSlider" min="0" max="100" value="80"
+             style="flex:1; accent-color:#58a6ff;">
+      <span style="color:#484f58; font-size:11px;">Spread</span>
+    </div>
+  </div>
+
+  <!-- Descriptions -->
+  <div style="flex:1; min-width:260px;">
+    <div id="layerDesc3" class="layer-desc" style="border-left:3px solid #d29922; padding-left:12px; margin-bottom:14px; opacity:0.4;">
+      <div style="color:#d29922; font-size:13px; font-weight:600;">Layer 3 — debugMaskOverlay</div>
+      <div style="color:#8b949e; font-size:13px;">Semi-transparent tint overlay. Only visible when <code>boundaryDebug=true</code>. Shows the active zone. Not included in exports.</div>
+    </div>
+    <div id="layerDesc2" class="layer-desc" style="border-left:3px solid #58a6ff; padding-left:12px; margin-bottom:14px;">
+      <div style="color:#58a6ff; font-size:13px; font-weight:600;">Layer 2 — canvasView (PKCanvasView)</div>
+      <div style="color:#8b949e; font-size:13px;">The drawing surface. Only holds the <strong>live, in-progress stroke</strong>. Always empty between strokes. Has a <code>CALayer.mask</code> that clips drawing to the active zone. Receives all touch events.</div>
+    </div>
+    <div id="layerDesc1" class="layer-desc" style="border-left:3px solid #3fb950; padding-left:12px; margin-bottom:14px;">
+      <div style="color:#3fb950; font-size:13px; font-weight:600;">Layer 1 — coloredLayer (UIImageView)</div>
+      <div style="color:#8b949e; font-size:13px;">All <strong>committed strokes</strong> as a composited UIImage. Each stroke is masked to its zone before compositing — zero overflow. Undo/redo swaps this image.</div>
+    </div>
+    <div id="layerDesc0" class="layer-desc" style="border-left:3px solid #d2a8ff; padding-left:12px; margin-bottom:14px;">
+      <div style="color:#d2a8ff; font-size:13px; font-weight:600;">Layer 0 — backgroundImageView</div>
+      <div style="color:#8b949e; font-size:13px;">The coloring page image with black outlines. <code>.scaleAspectFit</code>. Sits behind everything. Never modified.</div>
+    </div>
+    <div class="card" style="padding:14px; margin-top:8px;">
+      <div style="font-size:12px; color:#8b949e;">
+        <strong style="color:#c9d1d9;">Composited result:</strong> All layers render on top of each other. Transparent areas let lower layers show through. The user sees outlines + colored zones + live stroke as one image.
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .layer3d {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%) translateZ(var(--z, 0px));
+    transform-style: preserve-3d;
+    transition: all 0.35s ease;
+  }
+  .layer3d:hover .layer3d-content { filter: brightness(1.2); }
+  .layer3d.highlighted .layer3d-content {
+    box-shadow: 0 0 30px color-mix(in srgb, var(--color) 50%, transparent);
+    border-width: 3px;
+  }
+  .layer3d-face {
+    transform-style: preserve-3d;
+    overflow: visible;
+  }
+  .layer3d-content {
+    width: min(280px, 70vw); height: min(120px, 30vw);
+    border: 2px solid var(--color);
+    border-radius: 10px;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s;
+    transform-style: preserve-3d;
+  }
+  /* 3D bottom face — real thickness visible from the tilted angle */
+  .layer3d-content::before {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 10px;
+    background: color-mix(in srgb, var(--color) 20%, #0a0e14);
+    border: 2px solid color-mix(in srgb, var(--color) 60%, #0a0e14);
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+    transform: rotateX(-90deg);
+    transform-origin: bottom center;
+  }
+  /* 3D right face */
+  .layer3d-content::after {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0; right: 0;
+    width: 10px;
+    background: color-mix(in srgb, var(--color) 15%, #0a0e14);
+    border: 2px solid color-mix(in srgb, var(--color) 50%, #0a0e14);
+    border-left: none;
+    border-radius: 0 10px 10px 0;
+    transform: rotateY(90deg);
+    transform-origin: right center;
+  }
+  .layer3d-label {
+    position: absolute; top: 6px; left: 10px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    opacity: 0.95;
+  }
+  .layer3d-index {
+    position: absolute; top: 6px; right: 10px;
+    font-size: 13px; color: #8b949e; font-weight: 700;
+  }
+  .layer3d-note {
+    position: absolute; bottom: 6px; right: 10px;
+    font-size: 11px; color: #8b949e; font-weight: 500;
+  }
+  .layer-desc { transition: opacity 0.25s; }
+  .layer-desc.highlighted { opacity: 1 !important; }
+</style>
+
+<script>
+// Highlight layer
+function highlightLayer(n) {
+  document.querySelectorAll('.layer3d').forEach(c => c.classList.remove('highlighted'));
+  document.querySelectorAll('.layer-desc').forEach(d => { d.classList.remove('highlighted'); d.style.opacity = '0.4'; });
+  document.querySelector(`.layer3d[data-layer="${n}"]`)?.classList.add('highlighted');
+  const desc = document.getElementById(`layerDesc${n}`);
+  if (desc) { desc.classList.add('highlighted'); desc.style.opacity = '1'; }
+}
+highlightLayer(2);
+
+// Spread slider
+const spreadSlider = document.getElementById('spreadSlider');
+const layers = document.querySelectorAll('.layer3d');
+spreadSlider.addEventListener('input', () => updateLayerTransforms());
+
+// Click detection: find which layer card the user clicked by checking
+// the closest layer3d-content element in the event target's ancestors.
+// Falls back to finding the nearest card by vertical position.
+document.getElementById('stack3d').addEventListener('click', function(e) {
+  // Walk up from the clicked element to find the closest layer3d
+  let el = e.target;
+  while (el && !el.classList?.contains('layer3d')) {
+    el = el.parentElement;
+  }
+  if (el && el.dataset.layer !== undefined) {
+    highlightLayer(parseInt(el.dataset.layer));
+    return;
+  }
+  // Fallback: find nearest card by Y position within the scene
+  const rect = scene.getBoundingClientRect();
+  const clickY = e.clientY - rect.top;
+  const sceneH = rect.height;
+  // Map click Y (0=top, sceneH=bottom) to layer (3=top, 0=bottom)
+  const layerIdx = Math.round(3 - (clickY / sceneH) * 3);
+  highlightLayer(Math.max(0, Math.min(3, layerIdx)));
+});
+
+// Drag to rotate
+const scene = document.getElementById('scene3d');
+const stack = document.getElementById('stack3d');
+let dragging = false, startX = 0, startY = 0, rotX = 50, rotZ = -15;
+scene.addEventListener('mousedown', e => { dragging = true; startX = e.clientX; startY = e.clientY; scene.style.cursor = 'grabbing'; });
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const dx = e.clientX - startX, dy = e.clientY - startY;
+  rotZ = -30 + dx * 0.3;
+  rotX = Math.max(10, Math.min(80, 55 - dy * 0.3));
+  updateLayerTransforms();
+  startX = e.clientX; startY = e.clientY;
+});
+window.addEventListener('mouseup', () => { dragging = false; scene.style.cursor = 'grab'; });
+
+function updateLayerTransforms() {
+  stack.style.transform = `rotateX(${rotX}deg) rotateZ(${rotZ}deg)`;
+  const t = spreadSlider.value / 100;
+  // Z-spacing (depth) + Y-offset so cards don't overlap at max spread
+  const zSpacing = 80 * (0.15 + t * 0.85);
+  const ySpacing = 80 * t;  // Large vertical offset so cards are fully isolated at max
+  layers.forEach(el => {
+    const ly = parseInt(el.dataset.layer);
+    const z = (ly - 1.5) * zSpacing;
+    const y = (1.5 - ly) * ySpacing;  // Higher layers move up, lower move down
+    el.style.setProperty('--z', z + 'px');
+    el.style.transform = `translate(-50%, calc(-50% + ${y}px)) translateZ(${z}px)`;
+  });
+}
+updateLayerTransforms();
+</script>
+
+<!-- ─── CORE ARCHITECTURE ─── -->
+<h2>The "Always-Empty Canvas" Architecture</h2>
+<p>The key insight: PencilKit kills the active stroke if you set <code>canvasView.drawing</code> during a touch. So we <strong>never swap drawings</strong>. Instead, the canvas is always empty when a new stroke starts.</p>
+
+<div class="timeline">
+  <div class="step done">
+    <h3>1. Touch Down</h3>
+    <p><code>ZoneTouchDetector</code> fires, detects which zone was touched, applies the zone's mask to the canvas. Then immediately fails (<code>state = .failed</code>) so PencilKit gets the touch.</p>
+  </div>
+  <div class="step done">
+    <h3>2. PencilKit Starts Stroke</h3>
+    <p>PencilKit processes the same touch and begins drawing. The stroke is visually clipped by the <code>CALayer.mask</code> on the canvas — it only appears inside the zone.</p>
+    <p><em>Note: During drawing, the stroke is a temporary overlay. It's NOT in <code>canvasView.drawing.strokes</code> yet.</em></p>
+  </div>
+  <div class="step done">
+    <h3>3. Finger Lifts</h3>
+    <p><code>canvasViewDidEndUsingTool</code> fires. But the stroke is STILL not in <code>drawing.strokes</code>!</p>
+  </div>
+  <div class="step active">
+    <h3>4. Stroke Finalized</h3>
+    <p><code>canvasViewDrawingDidChange</code> fires with increased stroke count. <strong>This is the commit moment.</strong></p>
+    <ul>
+      <li>Render stroke via <code>PKDrawing.image()</code> (reliable, view-independent)</li>
+      <li>Mask it to the zone using Core Graphics <code>destinationIn</code> blend</li>
+      <li>Composite onto <code>coloredLayer</code></li>
+      <li>Clear the canvas (<code>canvasView.drawing = PKDrawing()</code>)</li>
+    </ul>
+  </div>
+  <div class="step">
+    <h3>5. Ready for Next Stroke</h3>
+    <p>Canvas is empty again. Next touch in ANY zone starts instantly — no swap needed.</p>
+  </div>
+</div>
+
+<!-- ─── CRITICAL TIMING ─── -->
+<h2>PencilKit Delegate Timing (Critical Discovery)</h2>
+<p>PencilKit's delegate methods fire in a non-obvious order. Getting this wrong caused 10+ failed implementations.</p>
+
+<div class="card card-blue">
+<pre style="font-family: 'SF Mono', monospace; font-size: 13px; line-height: 2;">
+<span style="color:#484f58">Touch Down:</span>
+  1. <span style="color:#d2a8ff">PKCanvasView</span> internal recognizers fire &rarr; <span style="color:#79c0ff">didBeginUsingTool</span>
+  2. <span style="color:#3fb950">ZoneTouchDetector.touchesBegan</span> fires &rarr; zone detection &rarr; mask applied
+
+<span style="color:#484f58">During Drawing:</span>
+  3. <span style="color:#79c0ff">canvasViewDrawingDidChange</span> fires (stroke path growing)
+     <span style="color:#da3633">BUT: stroke is NOT in drawing.strokes yet! It's a temporary overlay.</span>
+
+<span style="color:#484f58">Finger Lifts:</span>
+  4. <span style="color:#79c0ff">canvasViewDidEndUsingTool</span> fires
+     <span style="color:#da3633">BUT: stroke is STILL not in drawing.strokes!</span>
+
+  5. <span style="color:#79c0ff">canvasViewDrawingDidChange</span> fires (stroke count increases)
+     <span style="color:#3fb950">NOW: stroke IS in drawing.strokes. This is the ONLY safe commit point.</span>
+</pre>
+</div>
+
+<!-- ─── REGION DETECTION: THE CORE CONCEPT ─── -->
+<h2>How Colorable Regions Are Detected</h2>
+<p>This is the foundation of boundary coloring. A coloring page image (black outlines on white) is processed into a <strong>region map</strong> — a grid where each pixel knows which zone it belongs to. This happens once when the image loads.</p>
+
+<div class="diagram">
+  <div class="diagram-box">
+    <strong>1. Grayscale</strong>
+    <div class="diagram-label">Convert to 8-bit gray</div>
+  </div>
+  <div class="diagram-arrow">&rarr;</div>
+  <div class="diagram-box">
+    <strong>2. Threshold</strong>
+    <div class="diagram-label">&gt;128 = white, else black</div>
+  </div>
+  <div class="diagram-arrow">&rarr;</div>
+  <div class="diagram-box" style="border-color:#f59e0b;">
+    <strong>2.5 Dilate</strong>
+    <div class="diagram-label">Bridge outline gaps</div>
+  </div>
+  <div class="diagram-arrow">&rarr;</div>
+  <div class="diagram-box">
+    <strong>3. CCL</strong>
+    <div class="diagram-label">Label connected regions</div>
+  </div>
+  <div class="diagram-arrow">&rarr;</div>
+  <div class="diagram-box highlight">
+    <strong>4. Region Map</strong>
+    <div class="diagram-label">pixel &rarr; zone ID</div>
+  </div>
+  <div class="diagram-arrow">&rarr;</div>
+  <div class="diagram-box">
+    <strong>5. Canvas Map</strong>
+    <div class="diagram-label">Screen pixel &rarr; zone ID</div>
+  </div>
+</div>
+
+<!-- Step 1: Grayscale -->
+<h3>Step 1: Convert to Grayscale</h3>
+<div class="card">
+  <p>The coloring page can be any format (JPEG, PNG, etc.) with any color depth. We convert it to a simple <strong>8-bit grayscale</strong> image — one byte per pixel, values 0 (black) to 255 (white).</p>
+  <div style="display:flex; gap:16px; align-items:center; margin:12px 0; flex-wrap:wrap;">
+    <div style="text-align:center;">
+      <svg width="160" height="120" style="background:#fff; border-radius:6px; border:1px solid #30363d;">
+        <circle cx="50" cy="50" r="30" fill="none" stroke="#222" stroke-width="3"/>
+        <rect x="90" y="30" width="50" height="50" rx="4" fill="none" stroke="#222" stroke-width="3"/>
+        <line x1="30" y1="100" x2="130" y2="100" stroke="#222" stroke-width="3"/>
+      </svg>
+      <div style="font-size:11px; color:#8b949e; margin-top:4px;">Original image</div>
+    </div>
+    <div style="font-size:24px; color:#484f58;">&rarr;</div>
+    <div style="text-align:center;">
+      <svg width="160" height="120" style="background:#fff; border-radius:6px; border:1px solid #30363d;">
+        <circle cx="50" cy="50" r="30" fill="none" stroke="#000" stroke-width="3"/>
+        <rect x="90" y="30" width="50" height="50" rx="4" fill="none" stroke="#000" stroke-width="3"/>
+        <line x1="30" y1="100" x2="130" y2="100" stroke="#000" stroke-width="3"/>
+        <text x="80" y="14" fill="#888" font-size="9" text-anchor="middle">0-255 per pixel</text>
+      </svg>
+      <div style="font-size:11px; color:#8b949e; margin-top:4px;">8-bit grayscale</div>
+    </div>
+  </div>
+  <p style="font-size:13px; color:#8b949e;">In code: <code>CGContext</code> with <code>CGColorSpaceCreateDeviceGray()</code> renders any image format into a flat byte array.</p>
+</div>
+
+<!-- Step 2: Threshold -->
+<h3>Step 2: Threshold (Binary Image)</h3>
+<div class="card">
+  <p>Each pixel is classified as either <strong style="color:#f0f0f0;">white (colorable)</strong> or <strong style="color:#666;">black (outline)</strong> based on a threshold (default: 128).</p>
+  <div style="display:flex; gap:16px; align-items:center; margin:12px 0; flex-wrap:wrap;">
+    <div style="text-align:center;">
+      <svg width="160" height="120" style="background:#fff; border-radius:6px; border:1px solid #30363d;">
+        <circle cx="50" cy="50" r="30" fill="none" stroke="#000" stroke-width="3"/>
+        <rect x="90" y="30" width="50" height="50" rx="4" fill="none" stroke="#000" stroke-width="3"/>
+        <line x1="30" y1="100" x2="130" y2="100" stroke="#000" stroke-width="3"/>
+      </svg>
+      <div style="font-size:11px; color:#8b949e; margin-top:4px;">Grayscale</div>
+    </div>
+    <div style="font-size:24px; color:#484f58;">&rarr;</div>
+    <div style="text-align:center;">
+      <svg width="160" height="120" style="border-radius:6px; border:1px solid #30363d;">
+        <rect width="160" height="120" fill="#fff"/>
+        <circle cx="50" cy="50" r="30" fill="none" stroke="#000" stroke-width="5"/>
+        <rect x="90" y="30" width="50" height="50" rx="4" fill="none" stroke="#000" stroke-width="5"/>
+        <line x1="30" y1="100" x2="130" y2="100" stroke="#000" stroke-width="5"/>
+        <!-- Labels -->
+        <text x="50" y="52" fill="#3fb950" font-size="8" text-anchor="middle" font-weight="bold">WHITE</text>
+        <text x="115" y="57" fill="#3fb950" font-size="8" text-anchor="middle" font-weight="bold">WHITE</text>
+      </svg>
+      <div style="font-size:11px; color:#8b949e; margin-top:4px;">Binary: white vs black</div>
+    </div>
+  </div>
+  <div style="background:#0d1117; border-radius:6px; padding:10px 14px; margin:8px 0; font-size:13px;">
+    <code style="color:#79c0ff;">pixel &gt; 128</code> → <span style="color:#3fb950;">white (colorable)</span><br>
+    <code style="color:#79c0ff;">pixel &le; 128</code> → <span style="color:#f85149;">black (outline / boundary)</span>
+  </div>
+  <p style="font-size:13px; color:#8b949e;">The threshold is configurable via the <code>boundaryThreshold</code> prop. Higher values mean thicker outlines (more pixels treated as black).</p>
+</div>
+
+<!-- Step 2.5: Outline Dilation -->
+<h3>Step 2.5: Outline Dilation (Gap Bridging)</h3>
+<div class="card" style="border-color:#f59e0b;">
+  <p><strong style="color:#f59e0b;">Problem:</strong> If a coloring page has small gaps in its outlines (the line didn't fully close), CCL treats both sides of the gap as <strong>one connected region</strong>. The user could color across the gap into the neighbor.</p>
+
+  <div style="display:flex; gap:16px; align-items:center; margin:16px 0; flex-wrap:wrap;">
+    <div style="text-align:center;">
+      <svg width="140" height="120" style="background:#fff; border-radius:6px; border:1px solid #30363d;">
+        <!-- Circle with gap at top -->
+        <path d="M70,20 A35,35 0 1,1 60,22" fill="none" stroke="#222" stroke-width="3" stroke-linecap="round"/>
+        <!-- Gap indicator -->
+        <line x1="60" y1="18" x2="70" y2="16" stroke="#f59e0b" stroke-width="2" stroke-dasharray="3,2"/>
+        <text x="65" y="12" fill="#f59e0b" font-size="8" text-anchor="middle">gap!</text>
+        <!-- Arrow showing leak -->
+        <text x="105" y="30" fill="#da3633" font-size="8" text-anchor="middle">leak &darr;</text>
+      </svg>
+      <div style="font-size:11px; color:#da3633; margin-top:4px;">Without dilation: leak</div>
+    </div>
+    <div style="font-size:24px; color:#484f58;">&rarr;</div>
+    <div style="text-align:center;">
+      <svg width="140" height="120" style="background:#fff; border-radius:6px; border:1px solid #30363d;">
+        <!-- Circle fully closed (dilated) -->
+        <circle cx="70" cy="55" r="35" fill="none" stroke="#222" stroke-width="6"/>
+        <text x="70" y="58" fill="#3fb950" font-size="9" text-anchor="middle" font-weight="bold">closed</text>
+      </svg>
+      <div style="font-size:11px; color:#3fb950; margin-top:4px;">With dilation: sealed</div>
+    </div>
+  </div>
+
+  <p><strong style="color:#f59e0b;">Solution:</strong> Before CCL, expand every black (outline) pixel by <code>outlineDilation</code> pixels (default: 3) in all directions. This bridges gaps smaller than 6 pixels (2 &times; 3).</p>
+
+  <div style="background:#0d1117; border-radius:6px; padding:10px 14px; margin:8px 0; font-size:13px;">
+    <strong style="color:#c9d1d9;">Algorithm:</strong> Chebyshev distance transform (O(n)):<br>
+    1. Compute distance from each white pixel to nearest black pixel<br>
+    2. If distance &le; <code>outlineDilation</code> &rarr; pixel becomes black (outline)
+  </div>
+
+  <p style="font-size:13px; color:#8b949e;">This thickens all outlines uniformly. The colored area shrinks slightly (by <code>outlineDilation</code> pixels from each edge), but the gap is sealed. Increase the value for images with larger gaps.</p>
+</div>
+
+<!-- Step 3: CCL -->
+<h3>Step 3: Connected Component Labeling (CCL)</h3>
+<div class="card">
+  <p>This is the key algorithm. It scans every white pixel and groups connected ones into <strong>zones</strong>. Each zone gets a unique ID.</p>
+
+  <h3 style="margin-top:16px;">Interactive: Watch CCL Scan</h3>
+  <p style="font-size:13px; color:#8b949e; margin-bottom:8px;">Click "Run CCL" to watch the algorithm scan a small grid. White cells are colorable. The scanner assigns zone IDs (colors) to connected groups.</p>
+
+  <div style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
+    <div>
+      <canvas id="cclCanvas" width="280" height="280" style="border-radius:6px; border:1px solid #30363d; cursor:pointer;"></canvas>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button class="btn" id="cclRunBtn" onclick="runCCL()">Run CCL</button>
+        <button class="btn" id="cclResetBtn" onclick="resetCCL()">Reset</button>
+        <span id="cclStatus" style="font-size:12px; color:#8b949e; line-height:36px; margin-left:4px;"></span>
+      </div>
+    </div>
+    <div style="min-width:200px;">
+      <div style="font-size:13px; color:#c9d1d9; margin-bottom:8px;"><strong>How it works:</strong></div>
+      <div style="font-size:12px; color:#8b949e; line-height:1.7;">
+        1. Scan <strong>left→right, top→bottom</strong><br>
+        2. For each white pixel, check <strong>up</strong> and <strong>left</strong> neighbors<br>
+        3. <span style="color:#d2a8ff;">No labeled neighbor</span> → assign <strong>new zone ID</strong><br>
+        4. <span style="color:#58a6ff;">One labeled neighbor</span> → copy that <strong>zone ID</strong><br>
+        5. <span style="color:#f59e0b;">Both neighbors, different IDs</span> → copy smaller, <strong>union</strong> them<br>
+        6. Pass 2: <strong>flatten</strong> all labels to their root
+      </div>
+      <div style="margin-top:12px; padding:8px 12px; background:#0d1117; border-radius:6px;">
+        <div style="font-size:11px; color:#8b949e; margin-bottom:4px;">4-connectivity vs 8-connectivity:</div>
+        <div style="display:flex; gap:16px;">
+          <div style="text-align:center;">
+            <svg width="60" height="60">
+              <rect x="20" y="0" width="20" height="20" fill="#58a6ff44" stroke="#58a6ff" stroke-width="1" rx="2"/>
+              <rect x="0" y="20" width="20" height="20" fill="#58a6ff44" stroke="#58a6ff" stroke-width="1" rx="2"/>
+              <rect x="20" y="20" width="20" height="20" fill="#fff" stroke="#58a6ff" stroke-width="2" rx="2"/>
+              <rect x="40" y="20" width="20" height="20" fill="#58a6ff44" stroke="#58a6ff" stroke-width="1" rx="2"/>
+              <rect x="20" y="40" width="20" height="20" fill="#58a6ff44" stroke="#58a6ff" stroke-width="1" rx="2"/>
+            </svg>
+            <div style="font-size:9px; color:#58a6ff;">4-conn (used)</div>
+          </div>
+          <div style="text-align:center;">
+            <svg width="60" height="60">
+              <rect x="0" y="0" width="20" height="20" fill="#48484844" stroke="#484848" stroke-width="1" rx="2"/>
+              <rect x="20" y="0" width="20" height="20" fill="#48484844" stroke="#484848" stroke-width="1" rx="2"/>
+              <rect x="40" y="0" width="20" height="20" fill="#48484844" stroke="#484848" stroke-width="1" rx="2"/>
+              <rect x="0" y="20" width="20" height="20" fill="#48484844" stroke="#484848" stroke-width="1" rx="2"/>
+              <rect x="20" y="20" width="20" height="20" fill="#fff" stroke="#484848" stroke-width="2" rx="2"/>
+              <rect x="40" y="20" width="20" height="20" fill="#48484844" stroke="#484848" stroke-width="1" rx="2"/>
+              <rect x="0" y="40" width="20" height="20" fill="#48484844" stroke="#484848" stroke-width="1" rx="2"/>
+              <rect x="20" y="40" width="20" height="20" fill="#48484844" stroke="#484848" stroke-width="1" rx="2"/>
+              <rect x="40" y="40" width="20" height="20" fill="#48484844" stroke="#484848" stroke-width="1" rx="2"/>
+            </svg>
+            <div style="font-size:9px; color:#484848;">8-conn (not used)</div>
+          </div>
+        </div>
+        <div style="font-size:10px; color:#8b949e; margin-top:4px;">4-connectivity checks only up/down/left/right.<br>Diagonal-only touching = separate zones.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// CCL interactive demo
+const cclCanvas = document.getElementById('cclCanvas');
+const cclCtx = cclCanvas.getContext('2d');
+const GRID = 14;
+const CELL = 20;
+const zoneColors = [
+  null, '#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#a855f7',
+  '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16',
+  '#06b6d4', '#e11d3d', '#8b5cf6', '#10b981', '#f43f5e'
+];
+
+// Grid: 0=outline(black), 1=white(colorable)
+let grid = [];
+let labels = [];
+let cclRunning = false;
+
+function initGrid() {
+  // Create a simple coloring page pattern
+  grid = [];
+  for (let y = 0; y < GRID; y++) {
+    grid[y] = [];
+    for (let x = 0; x < GRID; x++) {
+      grid[y][x] = 1; // white by default
+    }
+  }
+  // Draw outlines (black lines)
+  // Vertical line
+  for (let y = 0; y < GRID; y++) { grid[y][5] = 0; }
+  // Horizontal line
+  for (let x = 0; x < GRID; x++) { grid[7][x] = 0; }
+  // Circle-ish shape top-left
+  const cx = 2, cy = 3;
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      const dx = x - cx, dy = y - cy;
+      if (Math.abs(Math.sqrt(dx*dx + dy*dy) - 2.5) < 0.7 && x < 5) grid[y][x] = 0;
+    }
+  }
+  // Small box bottom-right
+  for (let x = 8; x <= 12; x++) { grid[9][x] = 0; grid[12][x] = 0; }
+  for (let y = 9; y <= 12; y++) { grid[y][8] = 0; grid[y][12] = 0; }
+  // Border
+  for (let x = 0; x < GRID; x++) { grid[0][x] = 0; grid[GRID-1][x] = 0; }
+  for (let y = 0; y < GRID; y++) { grid[y][0] = 0; grid[y][GRID-1] = 0; }
+}
+
+function drawGrid(highlightX, highlightY) {
+  cclCtx.clearRect(0, 0, 280, 280);
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      const px = x * CELL, py = y * CELL;
+      if (grid[y][x] === 0) {
+        cclCtx.fillStyle = '#1a1a2e';
+      } else if (labels[y] && labels[y][x] > 0) {
+        cclCtx.fillStyle = zoneColors[labels[y][x] % zoneColors.length] || '#666';
+        cclCtx.globalAlpha = 0.5;
+      } else {
+        cclCtx.fillStyle = '#e8e8e8';
+      }
+      cclCtx.fillRect(px, py, CELL - 1, CELL - 1);
+      cclCtx.globalAlpha = 1;
+
+      // Zone ID text
+      if (labels[y] && labels[y][x] > 0) {
+        cclCtx.fillStyle = '#fff';
+        cclCtx.font = 'bold 10px sans-serif';
+        cclCtx.textAlign = 'center';
+        cclCtx.fillText(labels[y][x], px + CELL/2, py + CELL/2 + 3);
+      }
+    }
+  }
+  // Scanner highlight
+  if (highlightX !== undefined && highlightY !== undefined) {
+    cclCtx.strokeStyle = '#58a6ff';
+    cclCtx.lineWidth = 2;
+    cclCtx.strokeRect(highlightX * CELL - 1, highlightY * CELL - 1, CELL + 1, CELL + 1);
+    // Show neighbors being checked
+    // Up
+    if (highlightY > 0) {
+      cclCtx.strokeStyle = '#d2a8ff88';
+      cclCtx.strokeRect(highlightX * CELL, (highlightY-1) * CELL, CELL - 1, CELL - 1);
+    }
+    // Left
+    if (highlightX > 0) {
+      cclCtx.strokeStyle = '#f59e0b88';
+      cclCtx.strokeRect((highlightX-1) * CELL, highlightY * CELL, CELL - 1, CELL - 1);
+    }
+  }
+}
+
+function resetCCL() {
+  cclRunning = false;
+  labels = [];
+  for (let y = 0; y < GRID; y++) { labels[y] = new Array(GRID).fill(0); }
+  initGrid();
+  drawGrid();
+  document.getElementById('cclStatus').textContent = '';
+}
+
+async function runCCL() {
+  if (cclRunning) return;
+  // Reset state without touching cclRunning
+  labels = [];
+  for (let y = 0; y < GRID; y++) { labels[y] = new Array(GRID).fill(0); }
+  initGrid();
+  drawGrid();
+  cclRunning = true;
+  const status = document.getElementById('cclStatus');
+
+  // Union-Find
+  const parent = [0];
+  let nextLabel = 1;
+  function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+  function union(a, b) { const ra = find(a), rb = find(b); if (ra !== rb) parent[Math.max(ra,rb)] = Math.min(ra,rb); }
+
+  // Pass 1
+  status.textContent = 'Pass 1: Scanning...';
+  for (let y = 0; y < GRID && cclRunning; y++) {
+    for (let x = 0; x < GRID && cclRunning; x++) {
+      if (grid[y][x] === 0) { drawGrid(x, y); await sleep(30); continue; }
+      const up = (y > 0 && grid[y-1][x] === 1) ? labels[y-1][x] : 0;
+      const left = (x > 0 && grid[y][x-1] === 1) ? labels[y][x-1] : 0;
+
+      if (up === 0 && left === 0) {
+        labels[y][x] = nextLabel;
+        parent.push(nextLabel);
+        nextLabel++;
+      } else if (up !== 0 && left === 0) {
+        labels[y][x] = up;
+      } else if (up === 0 && left !== 0) {
+        labels[y][x] = left;
+      } else {
+        labels[y][x] = Math.min(up, left);
+        union(up, left);
+      }
+      drawGrid(x, y);
+      await sleep(40);
+    }
+  }
+
+  if (!cclRunning) return;
+
+  // Pass 2: flatten
+  status.textContent = 'Pass 2: Flattening labels...';
+  await sleep(300);
+  // Remap to sequential
+  const rootMap = {};
+  let seqId = 0;
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      if (labels[y][x] > 0) {
+        const root = find(labels[y][x]);
+        if (rootMap[root] === undefined) { seqId++; rootMap[root] = seqId; }
+        labels[y][x] = rootMap[root];
+      }
+    }
+  }
+  drawGrid();
+
+  // Count zones
+  const zones = new Set();
+  for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) if (labels[y][x] > 0) zones.add(labels[y][x]);
+  status.textContent = `Done! ${zones.size} zones found`;
+  cclRunning = false;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+resetCCL();
+</script>
+
+<!-- Step 4: Region Map result -->
+<h3>Step 4: The Region Map</h3>
+<div class="card">
+  <p>After CCL, every pixel in the image has a zone ID:</p>
+  <ul>
+    <li><code>0</code> = outline pixel (black line — not colorable)</li>
+    <li><code>1, 2, 3, ...</code> = zone IDs (each connected white area gets a unique number)</li>
+  </ul>
+  <div style="display:flex; gap:16px; align-items:center; margin:12px 0; flex-wrap:wrap;">
+    <div style="text-align:center;">
+      <svg width="160" height="120" style="border-radius:6px; border:1px solid #30363d;">
+        <rect width="160" height="120" fill="#fff"/>
+        <circle cx="50" cy="50" r="30" fill="none" stroke="#000" stroke-width="4"/>
+        <rect x="90" y="30" width="50" height="50" rx="4" fill="none" stroke="#000" stroke-width="4"/>
+      </svg>
+      <div style="font-size:11px; color:#8b949e; margin-top:4px;">Binary image</div>
+    </div>
+    <div style="font-size:24px; color:#484f58;">&rarr;</div>
+    <div style="text-align:center;">
+      <svg width="160" height="120" style="border-radius:6px; border:1px solid #30363d;">
+        <rect width="160" height="120" fill="#1a1a2e"/>
+        <!-- Zone 1: inside circle -->
+        <circle cx="50" cy="50" r="27" fill="#ef444466"/>
+        <text x="50" y="54" fill="#fff" font-size="14" text-anchor="middle" font-weight="bold">1</text>
+        <!-- Zone 2: inside rect -->
+        <rect x="93" y="33" width="44" height="44" rx="2" fill="#3b82f666"/>
+        <text x="115" y="59" fill="#fff" font-size="14" text-anchor="middle" font-weight="bold">2</text>
+        <!-- Zone 3: background -->
+        <text x="130" y="110" fill="#22c55e" font-size="10" text-anchor="middle">3 (bg)</text>
+        <!-- Outlines = 0 -->
+        <circle cx="50" cy="50" r="30" fill="none" stroke="#555" stroke-width="3"/>
+        <rect x="90" y="30" width="50" height="50" rx="4" fill="none" stroke="#555" stroke-width="3"/>
+        <text x="80" y="14" fill="#f8514988" font-size="9" text-anchor="middle">outlines = 0</text>
+      </svg>
+      <div style="font-size:11px; color:#8b949e; margin-top:4px;">Region map (zone IDs)</div>
+    </div>
+  </div>
+  <p style="font-size:13px; color:#8b949e;">Stored as a flat <code>Int32</code> array: <code>regionMap[y * width + x] = zoneID</code>. For a 1030&times;1207 image, this is ~5MB.</p>
+</div>
+
+<!-- Step 5: Canvas mapping -->
+<h3>Step 5: Canvas-Resolution Mapping</h3>
+<div class="card">
+  <p>The boundary image (e.g., 1030&times;1207 pixels) is displayed <strong>scaled to fit</strong> the canvas (e.g., 360&times;360 points &times; 3x = 1080&times;1080 pixels). We pre-compute a mapping from each <strong>screen pixel</strong> to its zone ID.</p>
+
+  <div style="display:flex; gap:16px; align-items:center; margin:12px 0; flex-wrap:wrap;">
+    <div style="text-align:center;">
+      <div style="width:100px; height:120px; border:2px solid #d2a8ff; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:11px; color:#d2a8ff;">
+        1030 &times; 1207<br>image pixels
+      </div>
+      <div style="font-size:11px; color:#8b949e; margin-top:4px;">Region map</div>
+    </div>
+    <div style="font-size:24px; color:#484f58;">&rarr;</div>
+    <div style="text-align:center;">
+      <div style="position:relative; width:108px; height:108px; border:2px solid #58a6ff; border-radius:6px; display:flex; align-items:center; justify-content:center;">
+        <div style="width:82px; height:108px; border:1px dashed #58a6ff44; display:flex; align-items:center; justify-content:center; font-size:10px; color:#58a6ff;">
+          aspect-fit<br>mapping
+        </div>
+        <!-- Letterbox bars -->
+        <div style="position:absolute; left:0; top:0; width:12px; height:100%; background:#58a6ff11;"></div>
+        <div style="position:absolute; right:0; top:0; width:12px; height:100%; background:#58a6ff11;"></div>
+      </div>
+      <div style="font-size:11px; color:#8b949e; margin-top:4px;">1080 &times; 1080 canvas pixels</div>
+    </div>
+    <div style="font-size:24px; color:#484f58;">&rarr;</div>
+    <div style="text-align:center;">
+      <div style="padding:10px 14px; background:#161b22; border-radius:6px; border:1px solid #3fb950; font-size:11px; color:#3fb950;">
+        Zone 5: [px 1204, 1205,<br>1206, 1523, 1524, ...]<br>
+        <span style="color:#8b949e;">per-zone pixel indices</span>
+      </div>
+      <div style="font-size:11px; color:#8b949e; margin-top:4px;">Instant mask lookup</div>
+    </div>
+  </div>
+
+  <p style="font-size:13px; color:#8b949e;">For each canvas pixel, we compute: <code>imageX = (canvasX - offsetX) / renderW * imageW</code>. The result is stored as <strong>per-zone pixel index lists</strong> — to generate a mask for zone 5, just set those specific pixels to opaque. No scanning needed.</p>
+</div>
+
+<!-- How touch → zone works -->
+<h3>How Touch Becomes a Zone</h3>
+<div class="card card-blue">
+  <p>When the user touches the canvas, we convert the touch point to a zone ID in 3 steps:</p>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:12px 0;">
+    <div class="diagram-box" style="min-width:auto; padding:8px 12px;">
+      <strong style="font-size:12px;">Touch point</strong>
+      <div class="diagram-label">(x: 150, y: 200) in canvas</div>
+    </div>
+    <div class="diagram-arrow">&rarr;</div>
+    <div class="diagram-box" style="min-width:auto; padding:8px 12px;">
+      <strong style="font-size:12px;">Image pixel</strong>
+      <div class="diagram-label">(imgX: 502, imgY: 670)</div>
+    </div>
+    <div class="diagram-arrow">&rarr;</div>
+    <div class="diagram-box highlight" style="min-width:auto; padding:8px 12px;">
+      <strong style="font-size:12px;">Zone ID = 5</strong>
+      <div class="diagram-label">regionMap[670 * 1030 + 502]</div>
+    </div>
+  </div>
+  <p style="font-size:13px; color:#8b949e;">The conversion accounts for <strong>aspect-fit scaling</strong> — the image may be letterboxed/pillarboxed within the canvas. Touching the letterbox area returns zone 0 (no zone).</p>
+</div>
+
+<!-- ─── MASK GENERATION ─── -->
+<h2>Mask Generation & Performance</h2>
+
+<div class="card card-green">
+  <h3>Pre-computed Pixel Indices</h3>
+  <p>After building the canvas map, each zone has a <strong>list of pixel indices</strong> that belong to it. To generate a mask for zone 5:</p>
+  <ol style="font-size:13px; padding-left:20px;">
+    <li>Allocate a transparent RGBA buffer (all zeros = invisible)</li>
+    <li>For each index in zone 5's list: set that pixel to <code>RGBA(255, 255, 255, 255)</code> (opaque white)</li>
+    <li>Create a <code>CGImage</code> from the buffer</li>
+  </ol>
+  <p>This only touches the zone's own pixels (typically 1-5% of the canvas). <strong>Result:</strong> ~1ms per mask vs ~50ms for a full scan.</p>
+  <p style="font-size:13px; color:#8b949e;">The mask is used as <code>canvasView.layer.mask</code>. CALayer.mask uses the <strong>alpha channel</strong>: alpha=255 = visible, alpha=0 = hidden.</p>
+</div>
+
+<table>
+  <tr><th>Operation</th><th>Time</th><th>When</th></tr>
+  <tr><td>Image load + region map + canvas map</td><td>200-500ms</td><td>Once, background thread</td></tr>
+  <tr><td>Zone mask generation (first use)</td><td>~1ms</td><td>Once per zone, cached</td></tr>
+  <tr><td>Zone switch (mask change)</td><td>&lt;1ms</td><td>Each touch in new zone</td></tr>
+  <tr><td>Stroke commit</td><td>15-40ms</td><td>After each stroke (finger already lifted)</td></tr>
+  <tr><td>Undo (pop snapshot)</td><td>&lt;1ms</td><td>On undo button</td></tr>
+</table>
+
+<!-- ─── COMMIT PROCESS ─── -->
+<h2>Stroke Commit Process</h2>
+
+<div class="diagram">
+  <div class="diagram-box">
+    <strong>PKDrawing.image()</strong>
+    <div class="diagram-label">Raw stroke pixels</div>
+  </div>
+  <div class="diagram-arrow">&rarr;</div>
+  <div class="diagram-box">
+    <strong>destinationIn blend</strong>
+    <div class="diagram-label">Mask to zone shape</div>
+  </div>
+  <div class="diagram-arrow">&rarr;</div>
+  <div class="diagram-box highlight">
+    <strong>Composite</strong>
+    <div class="diagram-label">Add to coloredLayer</div>
+  </div>
+  <div class="diagram-arrow">&rarr;</div>
+  <div class="diagram-box">
+    <strong>Clear canvas</strong>
+    <div class="diagram-label">Ready for next stroke</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>destinationIn Blend Mode</h3>
+  <p>Core Graphics blend mode that keeps destination pixels only where the source has alpha &gt; 0.</p>
+  <ul>
+    <li>Draw the stroke image (destination)</li>
+    <li>Draw the zone mask on top with <code>.destinationIn</code></li>
+    <li>Result: stroke pixels are kept only inside the zone. Everything outside becomes transparent.</li>
+  </ul>
+  <p>This is more reliable than <code>CALayer.mask</code> for offline rendering because it doesn't depend on the view's display state.</p>
+</div>
+
+<!-- ─── UNDO/REDO ─── -->
+<h2>Undo / Redo</h2>
+<div class="card">
+  <p>PencilKit's native <code>UndoManager</code> resets when <code>canvasView.drawing</code> is set (which happens during commit). So we implement custom undo:</p>
+  <ul>
+    <li><strong>Before each commit:</strong> Push the current <code>coloredLayer.image</code> onto <code>coloredSnapshots</code> (undo stack)</li>
+    <li><strong>Undo:</strong> Pop from undo stack, push current to redo stack, restore <code>coloredLayer.image</code></li>
+    <li><strong>Redo:</strong> Pop from redo stack, push current to undo stack, restore <code>coloredLayer.image</code></li>
+    <li><strong>New stroke:</strong> Clears the redo stack (drawing after undo invalidates redo history)</li>
+  </ul>
+</div>
+
+<!-- ─── ZONE TOUCH DETECTOR ─── -->
+<h2>ZoneTouchDetector</h2>
+<div class="card card-green">
+  <p>A custom <code>UIGestureRecognizer</code> that captures the touch point and <strong>immediately fails</strong>.</p>
+  <pre style="font-family: 'SF Mono', monospace; font-size: 13px; color: #8b949e; margin-top: 12px;">
+override func touchesBegan(_ touches, with event) {
+    let point = touches.first?.location(in: view)
+    onTouchDown?(point)  <span style="color:#3fb950">// Detect zone, apply mask — synchronous</span>
+    state = .failed      <span style="color:#3fb950">// Release touch immediately</span>
+}</pre>
+  <p style="margin-top: 12px;">Why <code>.failed</code>? A gesture recognizer in <code>.began</code> or <code>.changed</code> state "holds" the touch, interfering with PencilKit's internal recognizers. By failing immediately, PencilKit processes the touch as if no other recognizer exists.</p>
+  <p>Previous approach (<code>UILongPressGestureRecognizer</code>) caused <code>canvasViewDidEndUsingTool</code> to fire at the wrong time — on the NEXT touch instead of on finger lift.</p>
+</div>
+
+<!-- ─── FAILED APPROACHES ─── -->
+<h2>Failed Approaches (10+ Iterations)</h2>
+<table>
+  <tr>
+    <th>#</th><th>Approach</th><th>Why It Failed</th>
+  </tr>
+  <tr>
+    <td>1</td>
+    <td>Accumulated CALayer.mask</td>
+    <td>Strokes overflow into neighbor zones when mask reveals multiple zones</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td>Bake in didEndUsingTool</td>
+    <td>Stroke NOT in drawing.strokes yet at that point — renders empty image</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td>UILongPressGestureRecognizer</td>
+    <td>Interferes with PencilKit delegates — didEndUsingTool fires on NEXT touch</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td>Per-zone drawing swap (sync)</td>
+    <td>Setting canvasView.drawing kills the active stroke — requires two touches</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td>Per-zone drawing swap (async)</td>
+    <td>Deferred swap still kills in-progress stroke — just delayed by one frame</td>
+  </tr>
+  <tr>
+    <td>6</td>
+    <td>Swap in touchesBegan</td>
+    <td>PencilKit's didBeginUsingTool fires BEFORE our recognizer — swap too late</td>
+  </tr>
+  <tr>
+    <td>7</td>
+    <td>PKStroke.mask (UIBezierPath)</td>
+    <td>Modifying strokes requires setting canvasView.drawing — same swap problem</td>
+  </tr>
+  <tr>
+    <td>8</td>
+    <td>Large erosion (20px)</td>
+    <td>Visible gap between color and outline. Wide brushes still overflow past the gap.</td>
+  </tr>
+  <tr>
+    <td>9</td>
+    <td>drawHierarchy / CALayer.render</td>
+    <td>Unreliable with CALayer.mask — sometimes captures empty/wrong content</td>
+  </tr>
+  <tr>
+    <td>10</td>
+    <td>PKDrawing.image + wrong timing</td>
+    <td>Correct rendering technique, but called in didEndUsingTool (stroke not ready)</td>
+  </tr>
+</table>
+
+<div class="card card-green">
+  <span class="badge badge-green">Solution</span>
+  <p style="margin-top: 8px;"><strong>PKDrawing.image() + destinationIn blend + commit in canvasViewDrawingDidChange</strong></p>
+  <p>The winning combination: reliable rendering (PKDrawing.image), reliable masking (destinationIn), and the correct timing (drawingDidChange when stroke count increases).</p>
+</div>
+
+<!-- ─── INTERACTIVE DEMO ─── -->
+<h2>Interactive Demo</h2>
+<p>Click on a zone to select it, then draw. Strokes are clipped to the selected zone and committed on mouse-up.</p>
+
+<div class="demo-container">
+  <div class="demo-canvas-wrap" id="demoWrap">
+    <canvas id="bgCanvas" width="300" height="300"></canvas>
+    <canvas id="coloredCanvas" width="300" height="300"></canvas>
+    <canvas id="drawCanvas" width="300" height="300"></canvas>
+  </div>
+  <div class="demo-controls">
+    <h3>Color</h3>
+    <div id="colorPicker">
+      <div class="color-swatch selected" style="background:#ef4444" data-color="#ef4444"></div>
+      <div class="color-swatch" style="background:#3b82f6" data-color="#3b82f6"></div>
+      <div class="color-swatch" style="background:#22c55e" data-color="#22c55e"></div>
+      <div class="color-swatch" style="background:#f59e0b" data-color="#f59e0b"></div>
+      <div class="color-swatch" style="background:#a855f7" data-color="#a855f7"></div>
+      <div class="color-swatch" style="background:#111111" data-color="#111111"></div>
+    </div>
+    <h3 style="margin-top:12px">Actions</h3>
+    <button class="btn" id="undoBtn" disabled>Undo</button>
+    <button class="btn" id="redoBtn" disabled>Redo</button>
+    <button class="btn" id="clearBtn">Clear</button>
+    <h3 style="margin-top:12px">Zone Info</h3>
+    <p id="zoneInfo" style="font-size:13px; color:#8b949e">Touch a zone to start</p>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+// Simple demo replicating the boundary coloring architecture in JavaScript
+
+const bgCanvas = document.getElementById('bgCanvas');
+const coloredCanvas = document.getElementById('coloredCanvas');
+const drawCanvas = document.getElementById('drawCanvas');
+const bgCtx = bgCanvas.getContext('2d');
+const coloredCtx = coloredCanvas.getContext('2d');
+const drawCtx = drawCanvas.getContext('2d');
+const logEl = document.getElementById('log');
+const zoneInfoEl = document.getElementById('zoneInfo');
+const undoBtn = document.getElementById('undoBtn');
+const redoBtn = document.getElementById('redoBtn');
+const clearBtn = document.getElementById('clearBtn');
+
+let currentColor = '#ef4444';
+let currentZone = -1;
+let isDrawing = false;
+let lastX = 0, lastY = 0;
+let undoStack = [];
+let redoStack = [];
+
+// Define simple zones (circles and rectangles as demo regions)
+const zones = [
+  { id: 1, type: 'circle', cx: 100, cy: 100, r: 60, label: 'Zone 1' },
+  { id: 2, type: 'circle', cx: 210, cy: 80, r: 50, label: 'Zone 2' },
+  { id: 3, type: 'rect', x: 40, y: 180, w: 120, h: 90, label: 'Zone 3' },
+  { id: 4, type: 'rect', x: 170, y: 160, w: 100, h: 110, label: 'Zone 4' },
+];
+
+function log(text, cls) {
+  const div = document.createElement('div');
+  div.className = 'log-entry ' + (cls || '');
+  div.textContent = text;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// Draw the coloring page outlines
+function drawBackground() {
+  bgCtx.fillStyle = '#ffffff';
+  bgCtx.fillRect(0, 0, 300, 300);
+  bgCtx.strokeStyle = '#222';
+  bgCtx.lineWidth = 3;
+  zones.forEach(z => {
+    bgCtx.beginPath();
+    if (z.type === 'circle') {
+      bgCtx.arc(z.cx, z.cy, z.r, 0, Math.PI * 2);
+    } else {
+      bgCtx.rect(z.x, z.y, z.w, z.h);
+    }
+    bgCtx.stroke();
+    // Label
+    bgCtx.fillStyle = '#aaa';
+    bgCtx.font = '11px sans-serif';
+    bgCtx.textAlign = 'center';
+    const cx = z.type === 'circle' ? z.cx : z.x + z.w / 2;
+    const cy = z.type === 'circle' ? z.cy - z.r - 8 : z.y - 6;
+    bgCtx.fillText(z.label, cx, cy);
+  });
+}
+
+// Check which zone a point is in
+function getZone(x, y) {
+  for (const z of zones) {
+    if (z.type === 'circle') {
+      const dx = x - z.cx, dy = y - z.cy;
+      if (dx * dx + dy * dy <= z.r * z.r) return z;
+    } else {
+      if (x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h) return z;
+    }
+  }
+  return null;
+}
+
+// Create clipping path for a zone
+function clipToZone(ctx, z) {
+  ctx.beginPath();
+  if (z.type === 'circle') {
+    ctx.arc(z.cx, z.cy, z.r - 1.5, 0, Math.PI * 2);
+  } else {
+    ctx.rect(z.x + 1.5, z.y + 1.5, z.w - 3, z.h - 3);
+  }
+  ctx.clip();
+}
+
+// Commit: render drawCanvas masked to zone, composite onto coloredCanvas, clear drawCanvas
+function commitStroke() {
+  if (currentZone < 0) return;
+  const z = zones.find(zn => zn.id === currentZone);
+  if (!z) return;
+
+  // Save undo state
+  undoStack.push(coloredCtx.getImageData(0, 0, 300, 300));
+  redoStack = [];
+  updateButtons();
+
+  // Mask + composite: clip coloredCanvas to zone, draw drawCanvas content
+  coloredCtx.save();
+  clipToZone(coloredCtx, z);
+  coloredCtx.drawImage(drawCanvas, 0, 0);
+  coloredCtx.restore();
+
+  // Clear draw canvas
+  drawCtx.clearRect(0, 0, 300, 300);
+
+  log(`Committed stroke to ${z.label}`, 'log-commit');
+}
+
+function updateButtons() {
+  undoBtn.disabled = undoStack.length === 0;
+  redoBtn.disabled = redoStack.length === 0;
+}
+
+// Color picker
+document.querySelectorAll('.color-swatch').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
+    el.classList.add('selected');
+    currentColor = el.dataset.color;
+  });
+});
+
+// Drawing
+drawCanvas.addEventListener('mousedown', e => {
+  const rect = drawCanvas.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const z = getZone(x, y);
+  if (z) {
+    currentZone = z.id;
+    zoneInfoEl.textContent = `Active: ${z.label} (ID: ${z.id})`;
+    log(`Touch → ${z.label} (mask applied)`, 'log-mask');
+
+    // Apply mask (clip) to draw canvas
+    drawCtx.clearRect(0, 0, 300, 300);
+
+    isDrawing = true;
+    lastX = x;
+    lastY = y;
+  }
+});
+
+drawCanvas.addEventListener('mousemove', e => {
+  if (!isDrawing) return;
+  const rect = drawCanvas.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+
+  const z = zones.find(zn => zn.id === currentZone);
+  if (!z) return;
+
+  // Draw clipped to zone
+  drawCtx.save();
+  clipToZone(drawCtx, z);
+  drawCtx.beginPath();
+  drawCtx.moveTo(lastX, lastY);
+  drawCtx.lineTo(x, y);
+  drawCtx.strokeStyle = currentColor;
+  drawCtx.lineWidth = 12;
+  drawCtx.lineCap = 'round';
+  drawCtx.lineJoin = 'round';
+  drawCtx.stroke();
+  drawCtx.restore();
+
+  lastX = x;
+  lastY = y;
+});
+
+drawCanvas.addEventListener('mouseup', () => {
+  if (!isDrawing) return;
+  isDrawing = false;
+  // Commit (like canvasViewDrawingDidChange with increased stroke count)
+  commitStroke();
+});
+
+drawCanvas.addEventListener('mouseleave', () => {
+  if (isDrawing) {
+    isDrawing = false;
+    commitStroke();
+  }
+});
+
+undoBtn.addEventListener('click', () => {
+  if (undoStack.length === 0) return;
+  redoStack.push(coloredCtx.getImageData(0, 0, 300, 300));
+  coloredCtx.putImageData(undoStack.pop(), 0, 0);
+  updateButtons();
+  log('Undo', 'log-undo');
+});
+
+redoBtn.addEventListener('click', () => {
+  if (redoStack.length === 0) return;
+  undoStack.push(coloredCtx.getImageData(0, 0, 300, 300));
+  coloredCtx.putImageData(redoStack.pop(), 0, 0);
+  updateButtons();
+  log('Redo', 'log-undo');
+});
+
+clearBtn.addEventListener('click', () => {
+  coloredCtx.clearRect(0, 0, 300, 300);
+  drawCtx.clearRect(0, 0, 300, 300);
+  undoStack = [];
+  redoStack = [];
+  currentZone = -1;
+  updateButtons();
+  zoneInfoEl.textContent = 'Touch a zone to start';
+  log('Cleared all', 'log-undo');
+});
+
+// Init
+drawBackground();
+log('Ready — click a zone and draw', 'log-zone');
+</script>
+
+<!-- ─── FILES ─── -->
+<h2>File Structure</h2>
+<table>
+  <tr><th>File</th><th>Purpose</th></tr>
+  <tr><td><code>ios/RegionMapBuilder.swift</code></td><td>CCL algorithm, canvas pre-mapping, mask generation</td></tr>
+  <tr><td><code>ios/ReactNativePencilKitView.swift</code></td><td>View hierarchy, zone detection, commit system, undo/redo</td></tr>
+  <tr><td><code>ios/ReactNativePencilKitModule.swift</code></td><td>Expo module: props, events, async functions</td></tr>
+  <tr><td><code>src/ReactNativePencilKit.types.ts</code></td><td>TypeScript interfaces for new props</td></tr>
+  <tr><td><code>example/App.tsx</code></td><td>Demo app with coloring book section</td></tr>
+</table>
+
+<div style="height: 48px"></div>
+</div>
+</body>
+</html>

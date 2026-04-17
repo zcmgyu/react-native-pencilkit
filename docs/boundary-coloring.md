@@ -17,15 +17,80 @@ contentView (UIView)
   └── canvasView             [2]  PKCanvasView — only the live, in-progress stroke
 ```
 
+## How Colorable Regions Are Detected
+
+This is the foundation of boundary coloring. A coloring page (black outlines on white) is processed into a **region map** where each pixel knows which zone it belongs to. This happens once when the image loads, on a background thread.
+
+### Step 1: Grayscale Conversion
+
+The image (JPEG, PNG, any format) is rendered into an 8-bit grayscale pixel buffer using `CGContext` with `CGColorSpaceCreateDeviceGray()`. Each pixel becomes a single byte: 0 (black) to 255 (white).
+
+### Step 2: Threshold (Binary Image)
+
+Each pixel is classified based on a configurable threshold (default: 128):
+- `pixel > 128` → **white** (colorable area)
+- `pixel ≤ 128` → **black** (outline / boundary — not colorable)
+
+The threshold is exposed as the `boundaryThreshold` prop. Higher values make outlines thicker (more pixels treated as black).
+
+### Step 2.5: Outline Dilation (Gap Bridging)
+
+If a coloring page has small gaps in its outlines (the artist's line didn't fully close a shape), CCL would treat both sides of the gap as ONE connected region — letting the user color across the gap into the neighbor.
+
+**Fix:** Before CCL, expand (dilate) the black outline pixels by a configurable radius (default: 3 pixels). This bridges gaps smaller than 2 × radius pixels.
+
+**Algorithm:** Chebyshev distance transform (O(n)):
+1. Compute the distance from each white pixel to the nearest black (outline) pixel
+2. White pixels with distance ≤ `outlineDilation` become black (added to the outline)
+
+This effectively thickens all outlines before region detection, closing small gaps without significantly changing the region shapes. The `outlineDilation` parameter is passed to `buildRegionMap()` (default: 3).
+
+### Step 3: Connected Component Labeling (CCL)
+
+The key algorithm. Scans every white pixel and groups connected ones into **zones**, each with a unique ID.
+
+**Two-pass algorithm with union-find (4-connectivity):**
+
+**Pass 1** — Scan left-to-right, top-to-bottom:
+- For each white pixel, check the pixel **above** and to the **left** (already processed)
+- Neither labeled → assign a **new zone ID**
+- One labeled → **copy** that zone ID
+- Both labeled with different IDs → copy the smaller ID, **union** them (they're the same zone seen from two directions)
+
+**Pass 2** — Flatten all labels:
+- Union-find's `find()` with path compression resolves all chains so every pixel points directly to its root zone ID
+- Remap to sequential IDs (1, 2, 3, ...) for clean output
+
+**4-connectivity** means we check only up/down/left/right neighbors, not diagonals. Two zones that only touch at a corner are treated as **separate zones**.
+
+**Result:** `regionMap[y * width + x] = zoneID` where 0 = outline, 1+ = colorable zone.
+
+### Step 4: Canvas-Resolution Pre-mapping
+
+The boundary image (e.g., 1030×1207 pixels) is displayed scaled to fit the canvas (e.g., 360×360 points × 3x = 1080×1080 pixels). We pre-compute a mapping from each **screen pixel** to its zone ID, accounting for aspect-fit scaling (letterbox/pillarbox offset).
+
+For each canvas pixel: `imageX = (canvasPixelX - offsetX) / renderWidth * imageWidth`
+
+The result is stored as **per-zone pixel index lists**: a dictionary where each zone ID maps to the list of canvas pixel indices that belong to it. This enables O(zone_size) mask generation instead of O(total_pixels).
+
+### Step 5: Touch → Zone ID
+
+When the user touches the canvas:
+1. Get touch point in canvas coordinates (e.g., x: 150, y: 200)
+2. Convert to image pixel coordinates using the inverse aspect-fit transform
+3. Look up `regionMap[imageY * width + imageX]` → zone ID
+4. If zone ID > 0 → apply that zone's mask. If 0 → on an outline, keep current mask.
+
 ### Data Flow
 
 ```
 Image Load (background thread):
-  1. Threshold image → binary (outline vs colorable)
-  2. Connected component labeling → regionMap (each pixel → zone ID)
-  3. Distance transform erosion → erodedRegionMap (3px inward from boundaries)
-  4. Pre-compute canvasRegionMap at screen pixel resolution
-  5. Pre-compute per-region pixel indices for instant mask generation
+  1. Grayscale conversion (CGContext → 8-bit buffer)
+  2. Threshold → binary (white = colorable, black = outline)
+  2.5. Outline dilation → bridge small gaps in outlines (Chebyshev distance transform)
+  3. Connected component labeling → regionMap (each pixel → zone ID)
+  4. Canvas-resolution pre-mapping (screen pixel → zone ID, aspect-fit adjusted)
+  5. Per-zone pixel index lists for instant mask generation
 
 Touch Down:
   1. ZoneTouchDetector.touchesBegan fires → captures point → immediately fails
@@ -57,7 +122,6 @@ Zone Switch:
 
 **RegionMapBuilder** (`ios/RegionMapBuilder.swift`)
 - Connected component labeling with union-find (O(n))
-- Chebyshev distance transform for erosion (O(n), replaces O(n × erosion^2) neighborhood scan)
 - Pre-computed canvas-resolution region map with per-region pixel indices
 - Mask generation: only iterates region's own pixels (20-100x faster than full scan)
 - Pre-computed UIBezierPaths per region (for potential PKStroke.mask use)
@@ -184,7 +248,7 @@ PencilKit's native UndoManager resets when `canvasView.drawing` is set (which ha
 
 | File | Purpose |
 |------|---------|
-| `ios/RegionMapBuilder.swift` | NEW — CCL, erosion, canvas map, mask generation |
+| `ios/RegionMapBuilder.swift` | NEW — CCL, canvas pre-mapping, mask generation |
 | `ios/ReactNativePencilKitView.swift` | Boundary coloring logic, zone detection, commit system |
 | `ios/ReactNativePencilKitModule.swift` | Props, events, undo wiring |
 | `src/ReactNativePencilKit.types.ts` | TypeScript interfaces for new props |
