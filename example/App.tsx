@@ -4,6 +4,7 @@ import {
 } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import {
+  BoundaryImageLoadEvent,
   CanRedoChangedEvent,
   CanUndoChangedEvent,
   DrawChangeEvent,
@@ -23,8 +24,10 @@ import {
   ScrollView,
   Share,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
 
@@ -57,6 +60,10 @@ export default function App() {
   const [backgroundColorInput, setBackgroundColorInput] = useState("FFFFFF");
   const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
   const [savedCanvasData, setSavedCanvasData] = useState("");
+  const [boundaryImage, setBoundaryImage] = useState<string | null>(null);
+  const [boundaryColoringEnabled, setBoundaryColoringEnabled] = useState(true);
+  const [boundaryDebug, setBoundaryDebug] = useState(false);
+  const [boundaryRegionCount, setBoundaryRegionCount] = useState(0);
 
   useEffect(() => {
     const setupTimer = setTimeout(() => {
@@ -178,6 +185,41 @@ export default function App() {
     setCanvasRerenderKey((prev) => prev + 1);
   };
 
+  const handlePickBoundaryImage = async () => {
+    try {
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        Alert.alert("Permission Required", "Permission to access camera roll is required.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets[0]) {
+        setBoundaryImage(result.assets[0].uri);
+      }
+    } catch (_) {
+      Alert.alert("Error", "Failed to pick image");
+    }
+  };
+
+  const handleRemoveBoundaryImage = () => {
+    setBoundaryImage(null);
+    setBoundaryRegionCount(0);
+    setCanvasRerenderKey((prev) => prev + 1);
+  };
+
+  const handleBoundaryImageLoad = (event: NativeEvent<BoundaryImageLoadEvent>) => {
+    const { success, regionCount, error } = event.nativeEvent;
+    if (success && regionCount) {
+      setBoundaryRegionCount(regionCount);
+    } else if (!success) {
+      Alert.alert("Error", error ?? "Failed to load boundary image");
+    }
+  };
+
   const handleSaveCanvasData = async () => {
     if (pencilKitRef.current) {
       try {
@@ -274,7 +316,7 @@ export default function App() {
                 </Text>
               </View>
               <View style={styles.toolbarActions}>
-                <Pressable
+                <TouchableOpacity
                   style={[
                     styles.toolButton,
                     !canUndoState && styles.toolButtonDisabled,
@@ -284,8 +326,8 @@ export default function App() {
                   hitSlop={HIT_SLOP}
                 >
                   <FontAwesome5 name="undo" size={14} color={COLORS.surface} />
-                </Pressable>
-                <Pressable
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={[
                     styles.toolButton,
                     !canRedoState && styles.toolButtonDisabled,
@@ -295,15 +337,15 @@ export default function App() {
                   hitSlop={HIT_SLOP}
                 >
                   <FontAwesome5 name="redo" size={14} color={COLORS.surface} />
-                </Pressable>
-                <Pressable
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={styles.toolButton}
                   onPress={handleShowColorPicker}
                   hitSlop={HIT_SLOP}
                 >
                   <FontAwesome5 name="palette" size={14} color={COLORS.surface} />
-                </Pressable>
-                <Pressable
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={styles.toolButton}
                   onPress={handleClear}
                   hitSlop={HIT_SLOP}
@@ -313,7 +355,7 @@ export default function App() {
                     size={14}
                     color={COLORS.surface}
                   />
-                </Pressable>
+                </TouchableOpacity>
               </View>
             </View>
             <View style={styles.canvasWrapper}>
@@ -324,14 +366,74 @@ export default function App() {
                 imagePath={
                   backgroundImage ? { uri: backgroundImage } : undefined
                 }
+                boundaryImagePath={
+                  boundaryImage ? { uri: boundaryImage } : undefined
+                }
+                boundaryColoringEnabled={boundaryColoringEnabled}
+                boundaryDebug={boundaryDebug}
                 onDrawStart={handleDrawStart}
                 onDrawEnd={handleDrawEnd}
                 onDrawChange={handleDrawChange}
                 onCanUndoChanged={handleCanUndoChanged}
                 onCanRedoChanged={handleCanRedoChanged}
+                onBoundaryImageLoad={handleBoundaryImageLoad}
               />
             </View>
           </View>
+        </View>
+
+        {/* Coloring book */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Coloring book</Text>
+
+          <Text style={styles.label}>Boundary image</Text>
+          {boundaryImage ? (
+            <View style={styles.imageRow}>
+              <Image
+                source={{ uri: boundaryImage }}
+                style={styles.thumb}
+                resizeMode="cover"
+              />
+              <Pressable
+                style={styles.removeImageButton}
+                onPress={handleRemoveBoundaryImage}
+              >
+                <FontAwesome5 name="times" size={12} color={COLORS.danger} />
+                <Text style={styles.removeImageText}>Remove</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable style={styles.outlineButton} onPress={handlePickBoundaryImage}>
+              <FontAwesome5 name="image" size={16} color={COLORS.accent} />
+              <Text style={styles.outlineButtonText}>Pick coloring page</Text>
+            </Pressable>
+          )}
+
+          {boundaryImage ? (
+            <>
+              <View style={[styles.switchRow, styles.labelSpaced]}>
+                <Text style={styles.switchLabel}>Boundary clipping</Text>
+                <Switch
+                  value={boundaryColoringEnabled}
+                  onValueChange={setBoundaryColoringEnabled}
+                  trackColor={{ true: COLORS.accent }}
+                />
+              </View>
+              <View style={styles.switchRow}>
+                <Text style={styles.switchLabel}>Debug overlay</Text>
+                <Switch
+                  value={boundaryDebug}
+                  onValueChange={setBoundaryDebug}
+                  trackColor={{ true: COLORS.success }}
+                />
+              </View>
+              {boundaryRegionCount > 0 ? (
+                <Text style={styles.hint}>
+                  {boundaryRegionCount} colorable regions detected
+                </Text>
+              ) : null}
+            </>
+          ) : null}
         </View>
 
         {/* Export & share */}
@@ -682,6 +784,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "500",
     color: COLORS.inkMuted,
+  },
+  switchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  switchLabel: {
+    fontSize: 15,
+    color: COLORS.ink,
   },
   footer: {
     height: 24,

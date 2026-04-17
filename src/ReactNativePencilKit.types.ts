@@ -41,11 +41,30 @@ export interface NativeEvent<T> {
 }
 
 /**
+ * Event payload for boundary image load events
+ */
+export interface BoundaryImageLoadEvent {
+  success: boolean;
+  regionCount?: number;
+  width?: number;
+  height?: number;
+  error?: string;
+}
+
+/**
  * Props for PencilKitView component
  */
 export interface PencilKitViewProps {
   style?: any;
   imagePath?: { uri: string };
+  /** Path to a boundary/outline image for coloring book mode. Strokes are clipped to the region where the user touches. */
+  boundaryImagePath?: { uri: string };
+  /** Whether boundary coloring is enabled. Default: true when boundaryImagePath is set. */
+  boundaryColoringEnabled?: boolean;
+  /** Grayscale threshold (0-255) for converting boundary image to regions. Default: 128. */
+  boundaryThreshold?: number;
+  /** Show debug overlay highlighting the active colorable region. Default: false. */
+  boundaryDebug?: boolean;
   onDrawStart?: (event: NativeEvent<DrawStartEvent>) => void;
   onDrawEnd?: (event: NativeEvent<DrawEndEvent>) => void;
   onDrawChange?: (event: NativeEvent<DrawChangeEvent>) => void;
@@ -55,6 +74,7 @@ export interface PencilKitViewProps {
   onCanRedoChanged?: (
     event: NativeEvent<CanRedoChangedEvent>
   ) => void;
+  onBoundaryImageLoad?: (event: NativeEvent<BoundaryImageLoadEvent>) => void;
 }
 
 /**
