@@ -261,7 +261,8 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
       // Build the region map on the background thread (CPU-intensive).
       // This identifies each enclosed white area as a separate "zone" with a unique ID.
       let builder = RegionMapBuilder()
-      builder.buildRegionMap(from: image, threshold: self?.boundaryThreshold ?? 128)
+      // outlineDilation: 0 keeps the colorable zone flush with the outline (no gap between fill and stroke).
+      builder.buildRegionMap(from: image, threshold: self?.boundaryThreshold ?? 128, outlineDilation: 0)
 
       // Pre-compute a canvas-resolution lookup table.
       // Maps each screen pixel to a zone ID, enabling instant mask generation later.
@@ -313,7 +314,7 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     guard let image = boundaryImage else { return }
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       let builder = RegionMapBuilder()
-      builder.buildRegionMap(from: image, threshold: clamped)
+      builder.buildRegionMap(from: image, threshold: clamped, outlineDilation: 0)
       DispatchQueue.main.async {
         guard let self = self else { return }
         self.regionMapBuilder = builder
