@@ -211,6 +211,18 @@ export const PencilKitView = React.forwardRef<
           }
         }
       },
+      resetTransform: async () => {
+        if (
+          Platform.OS === "ios" &&
+          ReactNativePencilKit &&
+          viewRef.current
+        ) {
+          const viewTag = findNodeHandle(viewRef.current);
+          if (viewTag) {
+            await ReactNativePencilKit.resetTransform(viewTag);
+          }
+        }
+      },
     }),
     []
   );

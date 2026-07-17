@@ -65,6 +65,8 @@ export interface PencilKitViewProps {
   boundaryThreshold?: number;
   /** Show debug overlay highlighting the active colorable region. Default: false. */
   boundaryDebug?: boolean;
+  /** Enable 2-finger pan/zoom/rotate of the page. 1 finger always draws. Default: true. */
+  pageTransformEnabled?: boolean;
   onDrawStart?: (event: NativeEvent<DrawStartEvent>) => void;
   onDrawEnd?: (event: NativeEvent<DrawEndEvent>) => void;
   onDrawChange?: (event: NativeEvent<DrawChangeEvent>) => void;
@@ -129,4 +131,6 @@ export interface PencilKitViewRef {
   setCanvasBackgroundColor(colorString: string): Promise<void>;
   getCanvasBackgroundColor(): Promise<string>;
   showColorPicker(): Promise<void>;
+  /** Animate the page back to centered + aspect-fit (identity transform). */
+  resetTransform(): Promise<void>;
 }
