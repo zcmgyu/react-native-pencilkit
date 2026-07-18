@@ -64,6 +64,7 @@ export default function App() {
   const [boundaryColoringEnabled, setBoundaryColoringEnabled] = useState(true);
   const [boundaryDebug, setBoundaryDebug] = useState(false);
   const [boundaryRegionCount, setBoundaryRegionCount] = useState(0);
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
   useEffect(() => {
     const setupTimer = setTimeout(() => {
@@ -127,6 +128,12 @@ export default function App() {
 
   const handleClear = () => {
     pencilKitRef.current?.clearDrawing();
+  };
+
+  const handleToggleFullScreen = () => {
+    setIsFullScreen((prev) => !prev);
+    // Re-fit the page to the new canvas size after the layout settles.
+    setTimeout(() => pencilKitRef.current?.resetTransform(), 50);
   };
 
   const handleShowColorPicker = () => {
@@ -288,6 +295,36 @@ export default function App() {
     }
   };
 
+  if (isFullScreen) {
+    return (
+      <View style={styles.fullScreenContainer}>
+        <PencilKitView
+          key={canvasRerenderKey.toString()}
+          ref={pencilKitRef}
+          style={StyleSheet.absoluteFill}
+          imagePath={backgroundImage ? { uri: backgroundImage } : undefined}
+          boundaryImagePath={boundaryImage ? { uri: boundaryImage } : undefined}
+          boundaryColoringEnabled={boundaryColoringEnabled}
+          boundaryDebug={boundaryDebug}
+          pageTransformEnabled
+          onDrawStart={handleDrawStart}
+          onDrawEnd={handleDrawEnd}
+          onDrawChange={handleDrawChange}
+          onCanUndoChanged={handleCanUndoChanged}
+          onCanRedoChanged={handleCanRedoChanged}
+          onBoundaryImageLoad={handleBoundaryImageLoad}
+        />
+        <TouchableOpacity
+          style={styles.fullScreenExitButton}
+          onPress={handleToggleFullScreen}
+          hitSlop={HIT_SLOP}
+        >
+          <MaterialCommunityIcons name="fullscreen-exit" size={22} color={COLORS.surface} />
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -356,6 +393,17 @@ export default function App() {
                     color={COLORS.surface}
                   />
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.toolButton}
+                  onPress={handleToggleFullScreen}
+                  hitSlop={HIT_SLOP}
+                >
+                  <MaterialCommunityIcons
+                    name={isFullScreen ? "fullscreen-exit" : "fullscreen"}
+                    size={16}
+                    color={COLORS.surface}
+                  />
+                </TouchableOpacity>
               </View>
             </View>
             <View style={styles.canvasWrapper}>
@@ -371,6 +419,7 @@ export default function App() {
                 }
                 boundaryColoringEnabled={boundaryColoringEnabled}
                 boundaryDebug={boundaryDebug}
+                pageTransformEnabled
                 onDrawStart={handleDrawStart}
                 onDrawEnd={handleDrawEnd}
                 onDrawChange={handleDrawChange}
@@ -797,5 +846,20 @@ const styles = StyleSheet.create({
   },
   footer: {
     height: 24,
+  },
+  fullScreenContainer: {
+    flex: 1,
+    backgroundColor: COLORS.ink,
+  },
+  fullScreenExitButton: {
+    position: "absolute",
+    top: 60,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.accent,
+    justifyContent: "center",
+    alignItems: "center",
   },
 });
