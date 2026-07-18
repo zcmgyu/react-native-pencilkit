@@ -202,6 +202,14 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     return ReactNativePencilKitView.aspectFitSize(imageSize: image.size, in: container)
   }
 
+  // Container size to precompute the canvas-map against. Uses the view's size, falling
+  // back to the screen size before the first layout (when `bounds` is still zero) so the
+  // map isn't built at full native image resolution. Call on the main thread.
+  private func sizeForCanvasMap() -> CGSize {
+    let size = bounds.size
+    return (size.width > 0 && size.height > 0) ? size : UIScreen.main.bounds.size
+  }
+
   // Pure helper (thread-safe — no UIView access): the largest rect with `imageSize`'s
   // aspect ratio that fits inside `container`. Falls back to `imageSize` when
   // `container` is degenerate (e.g. bounds not laid out yet), which still yields the
@@ -304,7 +312,10 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     }
 
     // Capture on the main thread — these are read on the background queue below.
-    let containerSize = bounds.size
+    // Before the first layout pass `bounds` is zero; fall back to the screen size so
+    // the canvas-map isn't precomputed at full native image resolution (aspect ratio
+    // is preserved either way, so masks still align once laid out).
+    let containerSize = sizeForCanvasMap()
     let dilation = boundaryOutlineDilation
 
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -393,7 +404,7 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
   // Precomputes at the page's aspect-fit size so masks stay aligned with the canvas.
   private func rebuildRegionMap() {
     guard let image = boundaryImage else { return }
-    let containerSize = bounds.size
+    let containerSize = sizeForCanvasMap()
     let threshold = boundaryThreshold
     let dilation = boundaryOutlineDilation
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
