@@ -9,8 +9,7 @@ import UIKit
 // ExpoView is Expo's base class for native views exposed to React Native.
 //
 //  ReactNativePencilKitView (self — the root view exposed to React Native)
-//  └── scrollView (UIScrollView)           ← handles pan/zoom gestures
-//      └── contentView (UIView)            ← the zoomable container; all children scale together
+//  └── pageContainer (UIView)            ← the single transformable object; all children move together
 //          ├── backgroundImageView?       ← [0] shows the coloring page image (.scaleAspectFit)
 //          ├── coloredLayer?              ← [1] UIImageView holding all committed/baked strokes
 //          ├── canvasView (PKCanvasView)  ← [2] Apple's drawing canvas — only holds the LIVE stroke
@@ -25,12 +24,11 @@ import UIKit
 // This class conforms to multiple protocols:
 //   - PKCanvasViewDelegate: receives drawing events (stroke start/end/change)
 //   - PKToolPickerObserver: notified when the tool picker changes (currently unused but required)
-//   - UIScrollViewDelegate: provides the zoomable view for pinch-to-zoom
-public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPickerObserver, UIScrollViewDelegate {
+//   - UIGestureRecognizerDelegate: allows our custom gesture recognizers to work alongside PencilKit's
+public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPickerObserver, UIGestureRecognizerDelegate {
 
   // Core views — always present
-  private let scrollView = UIScrollView()
-  private let contentView = UIView()           // The single zoomable child inside scrollView
+  private let pageContainer = UIView()          // The single transformable object (background + strokes + canvas)
   private let canvasView = PKCanvasView()       // Apple's PencilKit drawing surface
   private var backgroundImageView: UIImageView? // Optional background image (coloring page)
 
@@ -105,20 +103,16 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
   // Called once when the view is created. Sets up the view hierarchy.
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
-    setupScrollView()
+    setupPageContainer()
     setupCanvasView()
   }
 
   // MARK: - Setup
 
-  private func setupScrollView() {
-    scrollView.delegate = self               // We implement UIScrollViewDelegate for zoom
-    scrollView.minimumZoomScale = 1.0        // No zoom out beyond 1x
-    scrollView.maximumZoomScale = 5.0        // Allow 5x zoom in
-    scrollView.backgroundColor = .gray       // Visible when canvas is smaller than scroll view
-    scrollView.showsHorizontalScrollIndicator = false
-    scrollView.showsVerticalScrollIndicator = false
-    addSubview(scrollView)                   // Add scrollView as a child of this view
+  private func setupPageContainer() {
+    backgroundColor = .gray                  // Shows around the page when it's zoomed out / moved
+    pageContainer.backgroundColor = .white
+    addSubview(pageContainer)
   }
 
   private func setupCanvasView() {
@@ -131,18 +125,16 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     canvasView.delegate = self               // We implement PKCanvasViewDelegate
     canvasView.isUserInteractionEnabled = true
 
-    // Disable canvas's built-in scroll/zoom — our outer scrollView handles that instead.
-    // This way the background image and canvas zoom/pan together as one unit.
+    // Disable canvas's built-in scroll/zoom — the pageContainer's transform handles that instead.
+    // This way the background image and canvas pan/zoom/rotate together as one unit.
     canvasView.isScrollEnabled = false
     canvasView.minimumZoomScale = 1.0
     canvasView.maximumZoomScale = 1.0
 
     canvasView.drawing = PKDrawing()         // Start with an empty drawing
 
-    // Build the view hierarchy: contentView contains the canvas (and later, other layers)
-    contentView.backgroundColor = .white
-    contentView.addSubview(canvasView)
-    scrollView.addSubview(contentView)
+    // Build the view hierarchy: pageContainer holds the canvas (and later, other layers)
+    pageContainer.addSubview(canvasView)
 
     // Set up the zone touch detector.
     // When the user touches the canvas, this fires BEFORE PencilKit starts its stroke.
@@ -160,15 +152,18 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
   // We update all child frames to match the new size.
   override public func layoutSubviews() {
     super.layoutSubviews()
-    scrollView.frame = bounds                               // Fill the entire view
-    let contentSize = bounds.size
-    contentView.frame = CGRect(origin: .zero, size: contentSize)
-    scrollView.contentSize = contentSize                    // Tell scrollView how big the content is
-    canvasView.frame = contentView.bounds                   // Canvas fills the content area
-    backgroundImageView?.frame = contentView.bounds         // Background image fills the content area
-    coloredLayer?.frame = contentView.bounds                // Colored layer fills the content area
-    debugMaskOverlay?.frame = contentView.bounds            // Debug overlay fills the content area
-    maskLayer?.frame = canvasView.bounds                    // Mask matches canvas size
+    // Size the page to the view. Only recenter when untransformed — otherwise a
+    // layout pass (e.g. full-screen resize) would fight the user's transform; the
+    // JS side calls resetTransform() on such resizes.
+    pageContainer.bounds = CGRect(origin: .zero, size: bounds.size)
+    if pageContainer.transform.isIdentity {
+      pageContainer.center = CGPoint(x: bounds.midX, y: bounds.midY)
+    }
+    canvasView.frame = pageContainer.bounds                 // Canvas fills the page
+    backgroundImageView?.frame = pageContainer.bounds
+    coloredLayer?.frame = pageContainer.bounds
+    debugMaskOverlay?.frame = pageContainer.bounds
+    maskLayer?.frame = canvasView.bounds
   }
 
   // Called when this view is added to or removed from a parent view.
@@ -216,13 +211,13 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     }
   }
 
-  // Inserts the image as a UIImageView at the bottom of contentView's subview stack.
+  // Inserts the image as a UIImageView at the bottom of pageContainer's subview stack.
   private func setBackgroundImage(_ image: UIImage) {
     backgroundImageView?.removeFromSuperview()   // Remove old image if any
     let imageView = UIImageView(image: image)
     imageView.contentMode = .scaleAspectFit      // Maintain aspect ratio, fit within bounds
-    imageView.frame = contentView.bounds
-    contentView.insertSubview(imageView, at: 0)  // Insert at index 0 = behind everything
+    imageView.frame = pageContainer.bounds
+    pageContainer.insertSubview(imageView, at: 0)  // Insert at index 0 = behind everything
     backgroundImageView = imageView
     canvasView.backgroundColor = .clear          // Make canvas transparent so image shows through
   }
@@ -348,17 +343,17 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     // It sits above the background but below the canvas in the view hierarchy.
     if coloredLayer == nil {
       let layer = UIImageView()
-      layer.frame = contentView.bounds
+      layer.frame = pageContainer.bounds
       layer.isUserInteractionEnabled = false   // Touches pass through to the canvas
       layer.backgroundColor = .clear           // Transparent so background shows through
       // Insert above background (index 0) but below canvas
       let insertIndex = backgroundImageView != nil ? 1 : 0
-      contentView.insertSubview(layer, at: insertIndex)
+      pageContainer.insertSubview(layer, at: insertIndex)
       coloredLayer = layer
     }
 
     canvasView.backgroundColor = .clear
-    contentView.backgroundColor = .white
+    pageContainer.backgroundColor = .white
   }
 
   // Returns a cached CGImage mask for a zone. Generates it on first use (~1ms).
@@ -529,10 +524,10 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
 
     let overlay = UIImageView(image: debugImage)
     overlay.contentMode = .scaleAspectFit
-    overlay.frame = contentView.bounds
+    overlay.frame = pageContainer.bounds
     overlay.isUserInteractionEnabled = false  // Touches pass through
     let insertIndex = backgroundImageView != nil ? 1 : 0
-    contentView.insertSubview(overlay, at: insertIndex)
+    pageContainer.insertSubview(overlay, at: insertIndex)
     debugMaskOverlay = overlay
   }
 
@@ -606,7 +601,7 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
 
   // MARK: - Export
 
-  // Captures the entire contentView (background + colored strokes + canvas) as a PNG image.
+  // Captures the entire pageContainer (background + colored strokes + canvas) as a PNG image.
   // Hides the debug overlay during capture so it doesn't appear in the export.
   func captureImageWithDrawing() -> String {
     let debugWasVisible = debugMaskOverlay?.isHidden == false
@@ -614,9 +609,9 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
 
     // UIGraphicsImageRenderer creates a bitmap context at the view's scale.
     // drawHierarchy renders the ENTIRE view hierarchy (all subviews) into it.
-    let renderer = UIGraphicsImageRenderer(bounds: contentView.bounds)
+    let renderer = UIGraphicsImageRenderer(bounds: pageContainer.bounds)
     let image = renderer.image { _ in
-      contentView.drawHierarchy(in: contentView.bounds, afterScreenUpdates: true)
+      pageContainer.drawHierarchy(in: pageContainer.bounds, afterScreenUpdates: true)
     }
 
     if debugWasVisible {
@@ -671,14 +666,6 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     let data = canvasView.drawing.dataRepresentation().base64EncodedString()
     onDrawChange(["data": data])
     emitUndoRedoStateChanges()
-  }
-
-  // MARK: - UIScrollViewDelegate
-
-  // Tells the scroll view which subview to zoom. We zoom the contentView,
-  // which contains the background image, colored layer, and canvas together.
-  public func viewForZooming(in _: UIScrollView) -> UIView? {
-    return contentView
   }
 
   // MARK: - PKToolPickerObserver
