@@ -742,8 +742,54 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     }
   }
 
-  // Filled in by Task 4 (clamps + soft-snap + on-screen guard). No-op for now.
-  private func normalizeTransform() {}
+  // Constants
+  private let minScale: CGFloat = 0.5
+  private let maxScale: CGFloat = 5.0
+  private let rotationSnapRadians: CGFloat = 5.0 * .pi / 180.0  // soft-snap within 5°
+  private let onScreenMargin: CGFloat = 40.0                    // page always at least this visible
+
+  // Normalizes the page transform after a gesture ends:
+  //   - clamps scale to [minScale, maxScale]
+  //   - soft-snaps rotation to 0° when within rotationSnapRadians
+  //   - keeps the page partly on-screen (clampTranslation)
+  private func normalizeTransform() {
+    var t = pageContainer.transform
+
+    // Current scale = magnitude of the transform's first column.
+    let scale = sqrt(t.a * t.a + t.c * t.c)
+    if scale > 0 {
+      let clamped = min(max(scale, minScale), maxScale)
+      if clamped != scale {
+        let factor = clamped / scale
+        t = t.scaledBy(x: factor, y: factor)
+      }
+    }
+
+    // Soft-snap rotation to upright.
+    let angle = atan2(t.b, t.a)
+    if abs(angle) < rotationSnapRadians {
+      t = t.rotated(by: -angle)
+    }
+
+    UIView.animate(withDuration: 0.2) {
+      self.pageContainer.transform = t
+      self.clampTranslation()
+    }
+  }
+
+  // Keeps at least onScreenMargin points of the page's (transformed) bounding box
+  // inside the view on each axis, so the page can never be dragged fully off-screen.
+  private func clampTranslation() {
+    let f = pageContainer.frame               // frame accounts for the current transform
+    var center = pageContainer.center
+    let minX = onScreenMargin - f.width / 2
+    let maxX = bounds.width - onScreenMargin + f.width / 2
+    let minY = onScreenMargin - f.height / 2
+    let maxY = bounds.height - onScreenMargin + f.height / 2
+    center.x = min(max(center.x, minX), maxX)
+    center.y = min(max(center.y, minY), maxY)
+    pageContainer.center = center
+  }
 
   public func gestureRecognizer(_ g: UIGestureRecognizer,
                                 shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
