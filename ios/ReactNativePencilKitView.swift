@@ -77,6 +77,13 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
   private(set) var boundaryColoringEnabled: Bool = true  // Toggle boundary mode on/off
   private var boundaryThreshold: Int = 128               // Grayscale threshold for outline detection
   private var boundaryDebug: Bool = false                 // Show debug overlay
+  private(set) var pageTransformEnabled: Bool = true      // 2-finger pan/zoom/rotate on/off
+
+  // 2-touch gesture recognizers that transform the page. 1-finger touches are never
+  // claimed by these, so PencilKit drawing is unaffected.
+  private let pinchGR = UIPinchGestureRecognizer()
+  private let rotationGR = UIRotationGestureRecognizer()
+  private let panGR = UIPanGestureRecognizer()
 
   // Custom gesture recognizer that detects the touch point and immediately fails,
   // so PencilKit's own gesture recognizers can process the touch without interference.
@@ -113,6 +120,16 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     backgroundColor = .gray                  // Shows around the page when it's zoomed out / moved
     pageContainer.backgroundColor = .white
     addSubview(pageContainer)
+
+    pinchGR.addTarget(self, action: #selector(handlePinch(_:)))
+    rotationGR.addTarget(self, action: #selector(handleRotation(_:)))
+    panGR.addTarget(self, action: #selector(handlePan(_:)))
+    panGR.minimumNumberOfTouches = 2
+    panGR.maximumNumberOfTouches = 2
+    for gr in [pinchGR, rotationGR, panGR] as [UIGestureRecognizer] {
+      gr.delegate = self
+      addGestureRecognizer(gr)
+    }
   }
 
   private func setupCanvasView() {
@@ -666,6 +683,74 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     let data = canvasView.drawing.dataRepresentation().base64EncodedString()
     onDrawChange(["data": data])
     emitUndoRedoStateChanges()
+  }
+
+  // MARK: - Page Transform
+
+  // Cancels any in-flight PencilKit stroke by bouncing its drawing recognizer.
+  // Called when a 2-finger gesture begins so a transform never leaves a stray dot.
+  private func cancelActiveStroke() {
+    let g = canvasView.drawingGestureRecognizer
+    g.isEnabled = false
+    g.isEnabled = true
+  }
+
+  @objc private func handlePinch(_ g: UIPinchGestureRecognizer) {
+    guard pageTransformEnabled else { return }
+    switch g.state {
+    case .began:
+      cancelActiveStroke()
+    case .changed:
+      pageContainer.transform = pageContainer.transform.scaledBy(x: g.scale, y: g.scale)
+      g.scale = 1.0
+    case .ended, .cancelled:
+      normalizeTransform()
+    default:
+      break
+    }
+  }
+
+  @objc private func handleRotation(_ g: UIRotationGestureRecognizer) {
+    guard pageTransformEnabled else { return }
+    switch g.state {
+    case .began:
+      cancelActiveStroke()
+    case .changed:
+      pageContainer.transform = pageContainer.transform.rotated(by: g.rotation)
+      g.rotation = 0
+    case .ended, .cancelled:
+      normalizeTransform()
+    default:
+      break
+    }
+  }
+
+  @objc private func handlePan(_ g: UIPanGestureRecognizer) {
+    guard pageTransformEnabled else { return }
+    switch g.state {
+    case .began:
+      cancelActiveStroke()
+    case .changed:
+      let t = g.translation(in: self)
+      pageContainer.center = CGPoint(x: pageContainer.center.x + t.x,
+                                     y: pageContainer.center.y + t.y)
+      g.setTranslation(.zero, in: self)
+    case .ended, .cancelled:
+      normalizeTransform()
+    default:
+      break
+    }
+  }
+
+  // Filled in by Task 4 (clamps + soft-snap + on-screen guard). No-op for now.
+  private func normalizeTransform() {}
+
+  public func gestureRecognizer(_ g: UIGestureRecognizer,
+                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+    let mine: Set<ObjectIdentifier> = [ObjectIdentifier(pinchGR),
+                                       ObjectIdentifier(rotationGR),
+                                       ObjectIdentifier(panGR)]
+    return mine.contains(ObjectIdentifier(g)) && mine.contains(ObjectIdentifier(other))
   }
 
   // MARK: - PKToolPickerObserver
