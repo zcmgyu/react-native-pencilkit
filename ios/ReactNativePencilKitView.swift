@@ -76,6 +76,7 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
   // Props from React Native
   private(set) var boundaryColoringEnabled: Bool = true  // Toggle boundary mode on/off
   private var boundaryThreshold: Int = 128               // Grayscale threshold for outline detection
+  private var boundaryOutlineDilation: Int = 0           // Outline dilation for region detection (0 = fill flush to stroke)
   private var boundaryDebug: Bool = false                 // Show debug overlay
   private(set) var pageTransformEnabled: Bool = true      // 2-finger pan/zoom/rotate on/off
 
@@ -169,18 +170,52 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
   // We update all child frames to match the new size.
   override public func layoutSubviews() {
     super.layoutSubviews()
-    // Size the page to the view. Only recenter when untransformed — otherwise a
-    // layout pass (e.g. full-screen resize) would fight the user's transform; the
-    // JS side calls resetTransform() on such resizes.
-    pageContainer.bounds = CGRect(origin: .zero, size: bounds.size)
+    // Size the page to the image's aspect ratio (a square image → a square page),
+    // fit within the view and centered — so the object the user zooms/pans/rotates
+    // is the sheet of paper itself, not a device-sized rectangle. Falls back to the
+    // full view size when there is no image.
+    let pageSize = fittedPageSize(in: bounds.size)
+    let sizeChanged = pageContainer.bounds.size != pageSize
+    pageContainer.bounds = CGRect(origin: .zero, size: pageSize)
+
+    // If the view's size actually changed while a transform was active (e.g. device
+    // rotation while zoomed/panned), drop the transform so the page can't end up
+    // off-screen or with a distorted, misaligned mask.
+    if sizeChanged && !pageContainer.transform.isIdentity {
+      pageContainer.transform = .identity
+    }
     if pageContainer.transform.isIdentity {
       pageContainer.center = CGPoint(x: bounds.midX, y: bounds.midY)
     }
+
     canvasView.frame = pageContainer.bounds                 // Canvas fills the page
     backgroundImageView?.frame = pageContainer.bounds
     coloredLayer?.frame = pageContainer.bounds
     debugMaskOverlay?.frame = pageContainer.bounds
     maskLayer?.frame = canvasView.bounds
+  }
+
+  // Aspect-fit size of the active page image within `container`, preserving the
+  // image's aspect ratio. Returns `container` unchanged when there is no image.
+  private func fittedPageSize(in container: CGSize) -> CGSize {
+    guard let image = boundaryImage ?? backgroundImageView?.image else { return container }
+    return ReactNativePencilKitView.aspectFitSize(imageSize: image.size, in: container)
+  }
+
+  // Pure helper (thread-safe — no UIView access): the largest rect with `imageSize`'s
+  // aspect ratio that fits inside `container`. Falls back to `imageSize` when
+  // `container` is degenerate (e.g. bounds not laid out yet), which still yields the
+  // correct aspect ratio for the canvas-map precompute.
+  static func aspectFitSize(imageSize: CGSize, in container: CGSize) -> CGSize {
+    guard imageSize.width > 0, imageSize.height > 0 else { return container }
+    guard container.width > 0, container.height > 0 else { return imageSize }
+    let imageAspect = imageSize.width / imageSize.height
+    let containerAspect = container.width / container.height
+    if imageAspect > containerAspect {
+      return CGSize(width: container.width, height: container.width / imageAspect)
+    } else {
+      return CGSize(width: container.height * imageAspect, height: container.height)
+    }
   }
 
   // Called when this view is added to or removed from a parent view.
@@ -192,8 +227,14 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
       ReactNativePencilKitView.moduleInstance?.registerCanvasView(canvasView)
       ReactNativePencilKitView.moduleInstance?.registerPencilKitView(self)
     } else {
-      // View was removed — unregister
-      ReactNativePencilKitView.moduleInstance?.unregisterCanvasView()
+      // View was removed — unregister (only clears the module's refs if they still
+      // point at THIS view, so a departing view can't clobber a newer registration).
+      ReactNativePencilKitView.moduleInstance?.unregisterCanvasView(canvasView)
+      // Break the self <-> gesture-recognizer retain cycle so this view can deallocate.
+      // (self strongly owns the recognizers and is also their target.)
+      pinchGR.removeTarget(self, action: nil)
+      rotationGR.removeTarget(self, action: nil)
+      panGR.removeTarget(self, action: nil)
     }
   }
 
@@ -237,6 +278,9 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     pageContainer.insertSubview(imageView, at: 0)  // Insert at index 0 = behind everything
     backgroundImageView = imageView
     canvasView.backgroundColor = .clear          // Make canvas transparent so image shows through
+    // Resize the page to this image's aspect ratio (matters when there is no boundary image).
+    setNeedsLayout()
+    layoutIfNeeded()
   }
 
   private func clearBackgroundImage() {
@@ -259,6 +303,10 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
       return
     }
 
+    // Capture on the main thread — these are read on the background queue below.
+    let containerSize = bounds.size
+    let dilation = boundaryOutlineDilation
+
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       guard let data = try? Data(contentsOf: url),
             let image = UIImage(data: data)
@@ -273,14 +321,14 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
       // Build the region map on the background thread (CPU-intensive).
       // This identifies each enclosed white area as a separate "zone" with a unique ID.
       let builder = RegionMapBuilder()
-      // outlineDilation: 0 keeps the colorable zone flush with the outline (no gap between fill and stroke).
-      builder.buildRegionMap(from: image, threshold: self?.boundaryThreshold ?? 128, outlineDilation: 0)
+      builder.buildRegionMap(from: image, threshold: self?.boundaryThreshold ?? 128, outlineDilation: dilation)
 
-      // Pre-compute a canvas-resolution lookup table.
-      // Maps each screen pixel to a zone ID, enabling instant mask generation later.
-      let canvasSize = self?.canvasView.bounds.size ?? CGSize(width: 360, height: 360)
+      // Pre-compute the canvas-resolution lookup table at the page's aspect-fit size
+      // (the size the canvas takes once laid out), so generated masks align with the
+      // canvas regardless of the device's aspect ratio.
+      let mapSize = ReactNativePencilKitView.aspectFitSize(imageSize: image.size, in: containerSize)
       let scale = UIScreen.main.scale
-      builder.precomputeCanvasMap(canvasSize: canvasSize, scale: scale)
+      builder.precomputeCanvasMap(canvasSize: mapSize, scale: scale)
 
       // Switch to main thread to update UI state
       DispatchQueue.main.async {
@@ -288,7 +336,12 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
         self.boundaryImage = image
         self.regionMapBuilder = builder
         self.currentRegionId = -1
+        self.zoneMaskCache = [:]            // masks from any previous image are now stale
         self.applyBoundaryColoring()
+        // Resize the page to the new image's aspect ratio, then re-center/fit.
+        self.setNeedsLayout()
+        self.layoutIfNeeded()
+        self.resetTransform()
         // Notify React Native that the image loaded successfully
         self.onBoundaryImageLoad([
           "success": true,
@@ -321,16 +374,38 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     let clamped = max(0, min(255, threshold))
     guard clamped != boundaryThreshold else { return }
     boundaryThreshold = clamped
+    rebuildRegionMap()
+  }
 
-    // Rebuild region map with new threshold on background thread
+  // Change the outline dilation used when detecting colorable regions.
+  // 0 keeps fills flush with the outline (no gap between color and stroke); higher
+  // values bridge small gaps in imperfect outlines so color can't leak between
+  // adjacent regions.
+  func setBoundaryOutlineDilation(_ value: Int) {
+    let clamped = max(0, value)
+    guard clamped != boundaryOutlineDilation else { return }
+    boundaryOutlineDilation = clamped
+    rebuildRegionMap()
+  }
+
+  // Rebuilds the region map + canvas-map from the current boundary image using the
+  // current threshold and dilation, then refreshes state. Heavy work runs off-main.
+  // Precomputes at the page's aspect-fit size so masks stay aligned with the canvas.
+  private func rebuildRegionMap() {
     guard let image = boundaryImage else { return }
+    let containerSize = bounds.size
+    let threshold = boundaryThreshold
+    let dilation = boundaryOutlineDilation
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       let builder = RegionMapBuilder()
-      builder.buildRegionMap(from: image, threshold: clamped, outlineDilation: 0)
+      builder.buildRegionMap(from: image, threshold: threshold, outlineDilation: dilation)
+      let mapSize = ReactNativePencilKitView.aspectFitSize(imageSize: image.size, in: containerSize)
+      builder.precomputeCanvasMap(canvasSize: mapSize, scale: UIScreen.main.scale)
       DispatchQueue.main.async {
         guard let self = self else { return }
         self.regionMapBuilder = builder
         self.currentRegionId = -1
+        self.zoneMaskCache = [:]
         self.canvasView.layer.mask = nil
         self.maskLayer = nil
         self.updateDebugOverlay()
@@ -449,8 +524,10 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     // with .destinationIn blend mode. This keeps stroke pixels only where the mask has alpha > 0.
     UIGraphicsBeginImageContextWithOptions(size, false, scale)  // false = transparent background
     strokeImage.draw(at: .zero)
+    // Draw the zone mask scaled to fill the canvas rect (not at its natural size), so
+    // it stays aligned even if the precompute size differs slightly from the canvas.
     UIImage(cgImage: zoneMask, scale: scale, orientation: .up)
-      .draw(at: .zero, blendMode: .destinationIn, alpha: 1.0)
+      .draw(in: CGRect(origin: .zero, size: size), blendMode: .destinationIn, alpha: 1.0)
     let maskedStroke = UIGraphicsGetImageFromCurrentImageContext()
     UIGraphicsEndImageContext()
 

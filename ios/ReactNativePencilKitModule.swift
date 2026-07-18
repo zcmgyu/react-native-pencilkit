@@ -48,6 +48,10 @@ public class ReactNativePencilKitModule: Module {
         view.setBoundaryThreshold(threshold ?? 128)
       }
 
+      Prop("boundaryOutlineDilation") { (view: ReactNativePencilKitView, value: Int?) in
+        view.setBoundaryOutlineDilation(value ?? 0)
+      }
+
       Prop("boundaryDebug") { (view: ReactNativePencilKitView, debug: Bool?) in
         view.setBoundaryDebug(debug ?? false)
       }
@@ -166,7 +170,10 @@ public class ReactNativePencilKitModule: Module {
     pencilKitView = view
   }
 
-  func unregisterCanvasView() {
+  func unregisterCanvasView(_ canvas: PKCanvasView) {
+    // Only clear if the departing canvas is the one currently registered — prevents a
+    // view being torn down from nil'ing refs a newer view just registered.
+    guard canvasView === canvas else { return }
     canvasView = nil
     pencilKitView = nil
     toolPicker = nil
