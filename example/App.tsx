@@ -35,6 +35,16 @@ const { width: screenWidth } = Dimensions.get("window");
 const CANVAS_SIZE = Math.min(screenWidth - 40, 360);
 const HIT_SLOP = { top: 12, bottom: 12, left: 12, right: 12 };
 
+// Default drawing tool. Falls back: watercolor -> marker -> pen (iOS < 17).
+// Shared by initial setup and the full-screen toggle (re-asserted so the native
+// PencilKit tool picker stays visible in the new layout).
+const DEFAULT_TOOL = {
+  type: "watercolor" as const,
+  fallbackTool: "marker" as const,
+  width: 20.0,
+  color: "#FF0000",
+};
+
 // Sketchbook-inspired palette
 const COLORS = {
   paper: "#f8f6f2",
@@ -69,14 +79,7 @@ export default function App() {
   useEffect(() => {
     const setupTimer = setTimeout(() => {
       if (pencilKitRef.current) {
-        // Set watercolor as default tool with marker as fallback
-        // Falls back to: watercolor -> marker -> pen (if watercolor not available on iOS < 17)
-        pencilKitRef.current.setupToolPicker({
-          type: "watercolor",
-          fallbackTool: "marker",
-          width: 20.0,
-          color: "#FF0000",
-        });
+        pencilKitRef.current.setupToolPicker(DEFAULT_TOOL);
       }
     }, 100);
 
@@ -132,8 +135,13 @@ export default function App() {
 
   const handleToggleFullScreen = () => {
     setIsFullScreen((prev) => !prev);
-    // Re-fit the page to the new canvas size after the layout settles.
-    setTimeout(() => pencilKitRef.current?.resetTransform(), 50);
+    // After the layout settles: re-fit the page to the new size, and re-assert the
+    // PencilKit tool picker so its palette stays visible in the new layout (the same
+    // native view is reused, so this just re-shows the picker and re-focuses it).
+    setTimeout(() => {
+      pencilKitRef.current?.resetTransform();
+      pencilKitRef.current?.setupToolPicker(DEFAULT_TOOL);
+    }, 50);
   };
 
   const handleShowColorPicker = () => {
@@ -295,51 +303,13 @@ export default function App() {
     }
   };
 
-  if (isFullScreen) {
-    return (
-      <View style={styles.fullScreenContainer}>
-        <PencilKitView
-          key={canvasRerenderKey.toString()}
-          ref={pencilKitRef}
-          style={StyleSheet.absoluteFill}
-          imagePath={backgroundImage ? { uri: backgroundImage } : undefined}
-          boundaryImagePath={boundaryImage ? { uri: boundaryImage } : undefined}
-          boundaryColoringEnabled={boundaryColoringEnabled}
-          boundaryDebug={boundaryDebug}
-          pageTransformEnabled
-          onDrawStart={handleDrawStart}
-          onDrawEnd={handleDrawEnd}
-          onDrawChange={handleDrawChange}
-          onCanUndoChanged={handleCanUndoChanged}
-          onCanRedoChanged={handleCanRedoChanged}
-          onBoundaryImageLoad={handleBoundaryImageLoad}
-        />
-        <TouchableOpacity
-          style={styles.fullScreenExitButton}
-          onPress={handleToggleFullScreen}
-          hitSlop={HIT_SLOP}
-        >
-          <MaterialCommunityIcons name="fullscreen-exit" size={22} color={COLORS.surface} />
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.header}>
-          <Text style={styles.title}>PencilKit</Text>
-          <Text style={styles.subtitle}>Draw on the canvas below</Text>
-        </View>
-
-        {/* Canvas – hero section */}
-        <View style={styles.canvasSection}>
-          <View style={styles.canvasFrame}>
+      {/* Canvas — a single stable PencilKitView. The container morphs between framed
+          and full-screen; the view is never remounted, so coloring progress, the
+          configured tool, and the page transform all survive the toggle. */}
+      <View style={isFullScreen ? styles.canvasFullScreen : styles.canvasSection}>
+        <View style={isFullScreen ? styles.canvasFrameFull : styles.canvasFrame}>
             <View style={styles.toolbar}>
               <View style={styles.statusPill}>
                 <View
@@ -406,11 +376,11 @@ export default function App() {
                 </TouchableOpacity>
               </View>
             </View>
-            <View style={styles.canvasWrapper}>
+            <View style={isFullScreen ? styles.canvasWrapperFull : styles.canvasWrapper}>
               <PencilKitView
                 key={canvasRerenderKey.toString()}
                 ref={pencilKitRef}
-                style={styles.canvas}
+                style={isFullScreen ? styles.canvasFull : styles.canvas}
                 imagePath={
                   backgroundImage ? { uri: backgroundImage } : undefined
                 }
@@ -428,8 +398,19 @@ export default function App() {
                 onBoundaryImageLoad={handleBoundaryImageLoad}
               />
             </View>
-          </View>
         </View>
+      </View>
+
+      {!isFullScreen && (
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <Text style={styles.title}>PencilKit</Text>
+            <Text style={styles.subtitle}>Draw & color on the canvas above</Text>
+          </View>
 
         {/* Coloring book */}
         <View style={styles.section}>
@@ -593,8 +574,9 @@ export default function App() {
           ) : null}
         </View>
 
-        <View style={styles.footer} />
-      </ScrollView>
+          <View style={styles.footer} />
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -847,19 +829,29 @@ const styles = StyleSheet.create({
   footer: {
     height: 24,
   },
-  fullScreenContainer: {
-    flex: 1,
-    backgroundColor: COLORS.ink,
-  },
-  fullScreenExitButton: {
+  // Full-screen variants of the canvas container. The framed styles above and these
+  // toggle on the SAME elements, so the PencilKitView is restyled, never remounted.
+  canvasFullScreen: {
     position: "absolute",
-    top: 60,
-    right: 20,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.accent,
-    justifyContent: "center",
-    alignItems: "center",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10,
+    backgroundColor: COLORS.ink,
+    paddingTop: 50, // clear the status bar / notch so the toolbar is reachable
+  },
+  canvasFrameFull: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+    overflow: "hidden",
+  },
+  canvasWrapperFull: {
+    flex: 1,
+    overflow: "hidden",
+  },
+  canvasFull: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
   },
 });
