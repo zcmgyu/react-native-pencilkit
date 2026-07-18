@@ -695,6 +695,24 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     g.isEnabled = true
   }
 
+  // Enables/disables the 2-finger transform gestures. When disabled, the page snaps
+  // back to identity (centered + fit).
+  func setPageTransformEnabled(_ enabled: Bool) {
+    pageTransformEnabled = enabled
+    pinchGR.isEnabled = enabled
+    rotationGR.isEnabled = enabled
+    panGR.isEnabled = enabled
+    if !enabled { resetTransform() }
+  }
+
+  // Animates the page back to centered + aspect-fit (identity transform).
+  func resetTransform() {
+    UIView.animate(withDuration: 0.25) {
+      self.pageContainer.transform = .identity
+      self.pageContainer.center = CGPoint(x: self.bounds.midX, y: self.bounds.midY)
+    }
+  }
+
   @objc private func handlePinch(_ g: UIPinchGestureRecognizer) {
     guard pageTransformEnabled else { return }
     switch g.state {

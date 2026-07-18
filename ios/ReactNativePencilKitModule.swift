@@ -51,6 +51,10 @@ public class ReactNativePencilKitModule: Module {
       Prop("boundaryDebug") { (view: ReactNativePencilKitView, debug: Bool?) in
         view.setBoundaryDebug(debug ?? false)
       }
+
+      Prop("pageTransformEnabled") { (view: ReactNativePencilKitView, enabled: Bool?) in
+        view.setPageTransformEnabled(enabled ?? true)
+      }
     }
 
     // Setup tool picker for a specific canvas
@@ -127,6 +131,13 @@ public class ReactNativePencilKitModule: Module {
     AsyncFunction("showColorPicker") { (_: Int) in
       await MainActor.run {
         self.showColorPicker()
+      }
+    }
+
+    // Reset the page transform to centered + fit
+    AsyncFunction("resetTransform") { (_: Int) in
+      await MainActor.run {
+        self.pencilKitView?.resetTransform()
       }
     }
 
