@@ -424,7 +424,11 @@ public class ReactNativePencilKitModule: Module {
       return "FFFFFF" // Default to white
     }
 
-    return hexStringFromColor(canvasView.backgroundColor ?? UIColor.white)
+    // Resolve against the view's trait collection so a dynamic (light/dark) color
+    // reports the hex actually on screen, not whatever UITraitCollection.current is.
+    let bg = (canvasView.backgroundColor ?? UIColor.white)
+      .resolvedColor(with: canvasView.traitCollection)
+    return hexStringFromColor(bg)
   }
 
   // MARK: - Helper Methods

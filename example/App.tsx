@@ -339,7 +339,8 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+      {/* Full-screen shows a fixed dark bezel, so use light status-bar text there. */}
+      <StatusBar barStyle={isFullScreen || isDark ? "light-content" : "dark-content"} />
       {/* Canvas — a single stable PencilKitView. The container morphs between framed
           and full-screen; the view is never remounted, so coloring progress, the
           configured tool, and the page transform all survive the toggle. */}
@@ -874,7 +875,7 @@ const createStyles = (c: Palette) =>
     right: 0,
     bottom: 0,
     zIndex: 10,
-    backgroundColor: c.ink,
+    backgroundColor: LIGHT.ink, // fixed dark bezel in both themes (LIGHT.ink is dark)
     paddingTop: 50, // clear the status bar / notch so the toolbar is reachable
   },
   canvasFrameFull: {
