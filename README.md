@@ -1,6 +1,6 @@
 ## react-native-pencilkit
 
-PencilKit-powered drawing canvas for **React Native / Expo** with Apple Pencil support, zoom & pan, undo/redo, background images, and image/base64 export.
+PencilKit-powered drawing canvas for **React Native / Expo** with Apple Pencil support, pan / zoom / rotate, undo/redo, background images, boundary coloring, and image/base64 export.
 
 - **Platform**: iOS (PencilKit, iOS 13+) only
 - **UI**: High-level React component that wraps a `PKCanvasView` with events and imperative methods.
@@ -8,8 +8,9 @@ PencilKit-powered drawing canvas for **React Native / Expo** with Apple Pencil s
 ### Features
 
 - **Apple Pencil & touch drawing** using native `PencilKit`
-- **Zoom & pan** with synchronized background image + strokes
+- **Pan, zoom & rotate** — one finger draws, two fingers transform the page (pinch to zoom, twist to rotate, drag to move). The page is sized to the image's aspect ratio and fit-centered. Toggle with `pageTransformEnabled`; re-center/fit with `resetTransform()`
 - **Background image support** via `imagePath={{ uri }}` (e.g. photos, templates)
+- **Boundary coloring** — clip strokes to the region you touch on a coloring-page outline (see [docs/boundary-coloring.md](docs/boundary-coloring.md))
 - **Undo / redo** with live `canUndo` / `canRedo` events
 - **Export drawing** as base64 PNG with `captureDrawing()`
 - **Export image + drawing** as base64 PNG with `captureImageWithDrawing()` - captures both background image and drawings together
@@ -187,6 +188,7 @@ export interface PencilKitViewRef {
   setCanvasBackgroundColor(colorString: string): Promise<void>; // e.g. "#FFFFFF" or "FFFFFF"
   getCanvasBackgroundColor(): Promise<string>; // "RRGGBB"
   showColorPicker(): Promise<void>;
+  resetTransform(): Promise<void>; // animate the page back to centered + fit (identity)
 }
 ```
 
@@ -205,6 +207,7 @@ export interface PencilKitViewRef {
 | `setCanvasBackgroundColor`| `color: string`    | `Promise<void>`      | Set canvas background color (`RRGGBB` / hex) |
 | `getCanvasBackgroundColor`| `()`               | `Promise<string>`    | Get current background color as `RRGGBB`     |
 | `showColorPicker`        | `()`                | `Promise<void>`      | Present the native iOS color picker          |
+| `resetTransform`         | `()`                | `Promise<void>`      | Animate the page back to centered + aspect-fit (identity transform). Useful after resizing the canvas (e.g. entering/exiting full screen) |
 
 Example usage:
 
@@ -379,6 +382,7 @@ The fallback mechanism ensures your app works across different iOS versions. Whe
 export interface PencilKitViewProps {
   style?: any;
   imagePath?: { uri: string }; // background image
+  pageTransformEnabled?: boolean; // 2-finger pan/zoom/rotate; default true
   onDrawStart?: (event: NativeEvent<DrawStartEvent>) => void;
   onDrawEnd?: (event: NativeEvent<DrawEndEvent>) => void;
   onDrawChange?: (event: NativeEvent<DrawChangeEvent>) => void;
@@ -391,6 +395,7 @@ export interface PencilKitViewProps {
 | -------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `style`              | `any`                                            | Style object for the canvas view                                                                                                                             |
 | `imagePath`          | `{ uri: string }`                                | Optional background image. When unset, the canvas uses a white background. _Note:_ for local assets (e.g. `require('./assets/image.png')`), resolve the URI using [`resolveAssetSource()`](https://reactnative.dev/docs/image#resolveassetsource) before passing it. |
+| `pageTransformEnabled` | `boolean`                                      | Enable 2-finger pan / zoom / rotate of the page (one finger always draws). Default `true`. Set `false` to lock the page. |
 | `onDrawStart`        | `(event: NativeEvent<DrawStartEvent>) => void`   | Called when the user starts drawing                                                                                                                          |
 | `onDrawEnd`          | `(event: NativeEvent<DrawEndEvent>) => void`     | Called when the user finishes a drawing gesture                                                                                                             |
 | `onDrawChange`       | `(event: NativeEvent<DrawChangeEvent>) => void`  | Called whenever the drawing content changes                                                                                                                 |
@@ -402,6 +407,8 @@ export interface PencilKitViewProps {
   - `CanUndoChangedEvent` → `{ canUndo: boolean }`
   - `CanRedoChangedEvent` → `{ canRedo: boolean }`
 
+- **Boundary-coloring props** (`boundaryImagePath`, `boundaryColoringEnabled`, `boundaryThreshold`, `boundaryOutlineDilation`, `boundaryDebug`, `onBoundaryImageLoad`) are documented in [docs/boundary-coloring.md](docs/boundary-coloring.md).
+
 ---
 
 ### Example app
@@ -409,7 +416,9 @@ export interface PencilKitViewProps {
 This repo includes an Expo example demonstrating:
 
 - **Default tool selection** - Uses watercolor as the default tool (with automatic fallback to pencil on iOS < 17)
-- **Toolbar controls** (undo, redo, clear, color picker)
+- **Toolbar controls** (undo, redo, clear, color picker, full-screen toggle)
+- **Pan / zoom / rotate** — two-finger gestures on the page, with a full-screen canvas mode
+- **Boundary coloring** — pick a coloring-page outline and color within regions
 - **Background image selection** using `expo-image-picker`
 - **Saving canvas data** to base64 and sharing an exported PNG
 - **Saving image + drawing** as base64 using `captureImageWithDrawing()`
