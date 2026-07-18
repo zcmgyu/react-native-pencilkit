@@ -118,8 +118,8 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
   // MARK: - Setup
 
   private func setupPageContainer() {
-    backgroundColor = .gray                  // Shows around the page when it's zoomed out / moved
-    pageContainer.backgroundColor = .white
+    backgroundColor = ReactNativePencilKitView.surroundColor  // Area around the page (follows light/dark)
+    pageContainer.backgroundColor = ReactNativePencilKitView.paperColor
     addSubview(pageContainer)
 
     pinchGR.addTarget(self, action: #selector(handlePinch(_:)))
@@ -133,10 +133,19 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     }
   }
 
+  // Dynamic colors that follow the system light/dark appearance. UIKit re-resolves
+  // these automatically when the trait collection changes — no observers needed.
+  private static let paperColor = UIColor { traits in
+    traits.userInterfaceStyle == .dark ? UIColor(white: 0.11, alpha: 1.0) : .white  // ~#1C1C1E vs white
+  }
+  private static let surroundColor = UIColor { traits in
+    traits.userInterfaceStyle == .dark ? UIColor(white: 0.0, alpha: 1.0) : .gray
+  }
+
   private func setupCanvasView() {
-    // .anyInput allows both Apple Pencil AND finger drawing
+    // .anyInput allows both Apple Pencil AND finger drawing.
+    // No forced appearance — the canvas and PencilKit tool picker follow system light/dark.
     canvasView.drawingPolicy = .anyInput
-    canvasView.overrideUserInterfaceStyle = .light  // Force light mode for consistent appearance
     canvasView.isMultipleTouchEnabled = true
     canvasView.isOpaque = false              // Transparent so coloredLayer shows through
     canvasView.backgroundColor = UIColor.clear
@@ -294,7 +303,7 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
   private func clearBackgroundImage() {
     backgroundImageView?.removeFromSuperview()
     backgroundImageView = nil
-    canvasView.backgroundColor = .white          // Restore white background when no image
+    canvasView.backgroundColor = ReactNativePencilKitView.paperColor  // Restore paper (follows light/dark)
   }
 
   // MARK: - Boundary Coloring Props
@@ -456,7 +465,7 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     }
 
     canvasView.backgroundColor = .clear
-    pageContainer.backgroundColor = .white
+    pageContainer.backgroundColor = ReactNativePencilKitView.paperColor
   }
 
   // Returns a cached CGImage mask for a zone. Generates it on first use (~1ms).
