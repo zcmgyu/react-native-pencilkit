@@ -14,7 +14,7 @@ import {
   PencilKitView,
   PencilKitViewRef,
 } from "react-native-pencilkit";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Dimensions,
@@ -23,11 +23,13 @@ import {
   SafeAreaView,
   ScrollView,
   Share,
+  StatusBar,
   StyleSheet,
   Switch,
   Text,
   TextInput,
   TouchableOpacity,
+  useColorScheme,
   View,
 } from "react-native";
 
@@ -35,8 +37,31 @@ const { width: screenWidth } = Dimensions.get("window");
 const CANVAS_SIZE = Math.min(screenWidth - 40, 360);
 const HIT_SLOP = { top: 12, bottom: 12, left: 12, right: 12 };
 
-// Sketchbook-inspired palette
-const COLORS = {
+// Default drawing tool. Falls back: watercolor -> marker -> pen (iOS < 17).
+// Shared by initial setup and the full-screen toggle (re-asserted so the native
+// PencilKit tool picker stays visible in the new layout).
+const DEFAULT_TOOL = {
+  type: "watercolor" as const,
+  fallbackTool: "marker" as const,
+  width: 20.0,
+  color: "#FF0000",
+};
+
+// Sketchbook-inspired palettes. Selected per device theme via useColorScheme().
+type Palette = {
+  paper: string;
+  paperDark: string;
+  ink: string;
+  inkMuted: string;
+  accent: string;
+  accentLight: string;
+  surface: string;
+  border: string;
+  success: string;
+  danger: string;
+};
+
+const LIGHT: Palette = {
   paper: "#f8f6f2",
   paperDark: "#ebe7e0",
   ink: "#2d2a26",
@@ -49,8 +74,27 @@ const COLORS = {
   danger: "#c45c4a",
 };
 
+const DARK: Palette = {
+  paper: "#15130f",       // app background
+  paperDark: "#211d18",   // slightly lifted panels (toolbar)
+  ink: "#f2ede4",         // primary text
+  inkMuted: "#a89f92",    // secondary text / muted icons
+  accent: "#d4a574",      // warm copper, brightened for dark bg
+  accentLight: "#b87333",
+  surface: "#1c1915",     // cards / buttons
+  border: "#332e26",
+  success: "#6aa77c",
+  danger: "#e07a68",
+};
+
 export default function App() {
   const pencilKitRef = useRef<PencilKitViewRef>(null);
+
+  // Theme: follow the device light/dark appearance.
+  const scheme = useColorScheme();
+  const isDark = scheme === "dark";
+  const c = isDark ? DARK : LIGHT;
+  const styles = useMemo(() => createStyles(c), [c]);
 
   const [canUndoState, setCanUndoState] = useState(false);
   const [canvasRerenderKey, setCanvasRerenderKey] = useState(0);
@@ -64,18 +108,12 @@ export default function App() {
   const [boundaryColoringEnabled, setBoundaryColoringEnabled] = useState(true);
   const [boundaryDebug, setBoundaryDebug] = useState(false);
   const [boundaryRegionCount, setBoundaryRegionCount] = useState(0);
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
   useEffect(() => {
     const setupTimer = setTimeout(() => {
       if (pencilKitRef.current) {
-        // Set watercolor as default tool with marker as fallback
-        // Falls back to: watercolor -> marker -> pen (if watercolor not available on iOS < 17)
-        pencilKitRef.current.setupToolPicker({
-          type: "watercolor",
-          fallbackTool: "marker",
-          width: 20.0,
-          color: "#FF0000",
-        });
+        pencilKitRef.current.setupToolPicker(DEFAULT_TOOL);
       }
     }, 100);
 
@@ -127,6 +165,17 @@ export default function App() {
 
   const handleClear = () => {
     pencilKitRef.current?.clearDrawing();
+  };
+
+  const handleToggleFullScreen = () => {
+    setIsFullScreen((prev) => !prev);
+    // After the layout settles: re-fit the page to the new size, and re-assert the
+    // PencilKit tool picker so its palette stays visible in the new layout (the same
+    // native view is reused, so this just re-shows the picker and re-focuses it).
+    setTimeout(() => {
+      pencilKitRef.current?.resetTransform();
+      pencilKitRef.current?.setupToolPicker(DEFAULT_TOOL);
+    }, 50);
   };
 
   const handleShowColorPicker = () => {
@@ -290,19 +339,13 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.header}>
-          <Text style={styles.title}>PencilKit</Text>
-          <Text style={styles.subtitle}>Draw on the canvas below</Text>
-        </View>
-
-        {/* Canvas – hero section */}
-        <View style={styles.canvasSection}>
-          <View style={styles.canvasFrame}>
+      {/* Full-screen shows a fixed dark bezel, so use light status-bar text there. */}
+      <StatusBar barStyle={isFullScreen || isDark ? "light-content" : "dark-content"} />
+      {/* Canvas — a single stable PencilKitView. The container morphs between framed
+          and full-screen; the view is never remounted, so coloring progress, the
+          configured tool, and the page transform all survive the toggle. */}
+      <View style={isFullScreen ? styles.canvasFullScreen : styles.canvasSection}>
+        <View style={isFullScreen ? styles.canvasFrameFull : styles.canvasFrame}>
             <View style={styles.toolbar}>
               <View style={styles.statusPill}>
                 <View
@@ -325,7 +368,7 @@ export default function App() {
                   disabled={!canUndoState}
                   hitSlop={HIT_SLOP}
                 >
-                  <FontAwesome5 name="undo" size={14} color={COLORS.surface} />
+                  <FontAwesome5 name="undo" size={14} color={c.surface} />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
@@ -336,14 +379,14 @@ export default function App() {
                   disabled={!canRedoState}
                   hitSlop={HIT_SLOP}
                 >
-                  <FontAwesome5 name="redo" size={14} color={COLORS.surface} />
+                  <FontAwesome5 name="redo" size={14} color={c.surface} />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.toolButton}
                   onPress={handleShowColorPicker}
                   hitSlop={HIT_SLOP}
                 >
-                  <FontAwesome5 name="palette" size={14} color={COLORS.surface} />
+                  <FontAwesome5 name="palette" size={14} color={c.surface} />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.toolButton}
@@ -353,16 +396,27 @@ export default function App() {
                   <MaterialCommunityIcons
                     name="eraser"
                     size={14}
-                    color={COLORS.surface}
+                    color={c.surface}
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.toolButton}
+                  onPress={handleToggleFullScreen}
+                  hitSlop={HIT_SLOP}
+                >
+                  <MaterialCommunityIcons
+                    name={isFullScreen ? "fullscreen-exit" : "fullscreen"}
+                    size={16}
+                    color={c.surface}
                   />
                 </TouchableOpacity>
               </View>
             </View>
-            <View style={styles.canvasWrapper}>
+            <View style={isFullScreen ? styles.canvasWrapperFull : styles.canvasWrapper}>
               <PencilKitView
                 key={canvasRerenderKey.toString()}
                 ref={pencilKitRef}
-                style={styles.canvas}
+                style={isFullScreen ? styles.canvasFull : styles.canvas}
                 imagePath={
                   backgroundImage ? { uri: backgroundImage } : undefined
                 }
@@ -371,6 +425,7 @@ export default function App() {
                 }
                 boundaryColoringEnabled={boundaryColoringEnabled}
                 boundaryDebug={boundaryDebug}
+                pageTransformEnabled
                 onDrawStart={handleDrawStart}
                 onDrawEnd={handleDrawEnd}
                 onDrawChange={handleDrawChange}
@@ -379,8 +434,19 @@ export default function App() {
                 onBoundaryImageLoad={handleBoundaryImageLoad}
               />
             </View>
-          </View>
         </View>
+      </View>
+
+      {!isFullScreen && (
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <Text style={styles.title}>PencilKit</Text>
+            <Text style={styles.subtitle}>Draw & color on the canvas above</Text>
+          </View>
 
         {/* Coloring book */}
         <View style={styles.section}>
@@ -398,13 +464,13 @@ export default function App() {
                 style={styles.removeImageButton}
                 onPress={handleRemoveBoundaryImage}
               >
-                <FontAwesome5 name="times" size={12} color={COLORS.danger} />
+                <FontAwesome5 name="times" size={12} color={c.danger} />
                 <Text style={styles.removeImageText}>Remove</Text>
               </Pressable>
             </View>
           ) : (
             <Pressable style={styles.outlineButton} onPress={handlePickBoundaryImage}>
-              <FontAwesome5 name="image" size={16} color={COLORS.accent} />
+              <FontAwesome5 name="image" size={16} color={c.accent} />
               <Text style={styles.outlineButtonText}>Pick coloring page</Text>
             </Pressable>
           )}
@@ -416,7 +482,7 @@ export default function App() {
                 <Switch
                   value={boundaryColoringEnabled}
                   onValueChange={setBoundaryColoringEnabled}
-                  trackColor={{ true: COLORS.accent }}
+                  trackColor={{ true: c.accent }}
                 />
               </View>
               <View style={styles.switchRow}>
@@ -424,7 +490,7 @@ export default function App() {
                 <Switch
                   value={boundaryDebug}
                   onValueChange={setBoundaryDebug}
-                  trackColor={{ true: COLORS.success }}
+                  trackColor={{ true: c.success }}
                 />
               </View>
               {boundaryRegionCount > 0 ? (
@@ -444,7 +510,7 @@ export default function App() {
               style={styles.primaryButton}
               onPress={handleSaveCanvasData}
             >
-              <FontAwesome5 name="save" size={16} color={COLORS.surface} />
+              <FontAwesome5 name="save" size={16} color={c.surface} />
               <Text style={styles.primaryButtonText}>Save data</Text>
             </Pressable>
             <Pressable
@@ -455,13 +521,13 @@ export default function App() {
               onPress={handleLoadCanvasData}
               disabled={!savedCanvasData}
             >
-              <FontAwesome5 name="folder-open" size={16} color={COLORS.surface} />
+              <FontAwesome5 name="folder-open" size={16} color={c.surface} />
               <Text style={styles.primaryButtonText}>Load data</Text>
             </Pressable>
           </View>
           <View style={[styles.row, styles.rowSpaced]}>
             <Pressable style={styles.primaryButton} onPress={handleExportImage}>
-              <FontAwesome5 name="share-alt" size={16} color={COLORS.surface} />
+              <FontAwesome5 name="share-alt" size={16} color={c.surface} />
               <Text style={styles.primaryButtonText}>Share image</Text>
             </Pressable>
           </View>
@@ -470,7 +536,7 @@ export default function App() {
               style={styles.primaryButton}
               onPress={handleSaveImageWithDrawing}
             >
-              <FontAwesome5 name="image" size={16} color={COLORS.surface} />
+              <FontAwesome5 name="image" size={16} color={c.surface} />
               <Text style={styles.primaryButtonText}>Save image & drawing</Text>
             </Pressable>
           </View>
@@ -498,13 +564,13 @@ export default function App() {
                 style={styles.removeImageButton}
                 onPress={handleRemoveBackgroundImage}
               >
-                <FontAwesome5 name="times" size={12} color={COLORS.danger} />
+                <FontAwesome5 name="times" size={12} color={c.danger} />
                 <Text style={styles.removeImageText}>Remove</Text>
               </Pressable>
             </View>
           ) : (
             <Pressable style={styles.outlineButton} onPress={handlePickImage}>
-              <FontAwesome5 name="image" size={16} color={COLORS.accent} />
+              <FontAwesome5 name="image" size={16} color={c.accent} />
               <Text style={styles.outlineButtonText}>Pick image</Text>
             </Pressable>
           )}
@@ -522,7 +588,7 @@ export default function App() {
               value={backgroundColorInput}
               onChangeText={setBackgroundColorInput}
               placeholder="FFFFFF"
-              placeholderTextColor={COLORS.inkMuted}
+              placeholderTextColor={c.inkMuted}
               maxLength={6}
               autoCapitalize="characters"
             />
@@ -544,16 +610,18 @@ export default function App() {
           ) : null}
         </View>
 
-        <View style={styles.footer} />
-      </ScrollView>
+          <View style={styles.footer} />
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c: Palette) =>
+  StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.paper,
+    backgroundColor: c.paper,
   },
   scrollView: {
     flex: 1,
@@ -570,12 +638,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: "700",
-    color: COLORS.ink,
+    color: c.ink,
     letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 15,
-    color: COLORS.inkMuted,
+    color: c.inkMuted,
     marginTop: 4,
   },
   canvasSection: {
@@ -585,11 +653,11 @@ const styles = StyleSheet.create({
   canvasFrame: {
     width: CANVAS_SIZE + 2,
     borderRadius: 16,
-    backgroundColor: COLORS.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: c.border,
     overflow: "hidden",
-    shadowColor: COLORS.ink,
+    shadowColor: c.ink,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.06,
     shadowRadius: 12,
@@ -601,9 +669,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: COLORS.paperDark,
+    backgroundColor: c.paperDark,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    borderBottomColor: c.border,
   },
   statusPill: {
     flexDirection: "row",
@@ -614,14 +682,14 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: COLORS.inkMuted,
+    backgroundColor: c.inkMuted,
   },
   statusDotActive: {
-    backgroundColor: COLORS.success,
+    backgroundColor: c.success,
   },
   statusLabel: {
     fontSize: 13,
-    color: COLORS.inkMuted,
+    color: c.inkMuted,
     fontWeight: "500",
   },
   toolbarActions: {
@@ -633,12 +701,12 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: COLORS.accent,
+    backgroundColor: c.accent,
     justifyContent: "center",
     alignItems: "center",
   },
   toolButtonDisabled: {
-    backgroundColor: COLORS.inkMuted,
+    backgroundColor: c.inkMuted,
     opacity: 0.7,
   },
   canvasWrapper: {
@@ -648,26 +716,26 @@ const styles = StyleSheet.create({
   canvas: {
     width: CANVAS_SIZE,
     height: CANVAS_SIZE,
-    backgroundColor: COLORS.surface,
+    backgroundColor: c.surface,
   },
   section: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: c.surface,
     borderRadius: 14,
     padding: 18,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: c.border,
   },
   sectionTitle: {
     fontSize: 17,
     fontWeight: "600",
-    color: COLORS.ink,
+    color: c.ink,
     marginBottom: 14,
   },
   label: {
     fontSize: 14,
     fontWeight: "500",
-    color: COLORS.inkMuted,
+    color: c.inkMuted,
     marginBottom: 8,
   },
   labelSpaced: {
@@ -688,12 +756,12 @@ const styles = StyleSheet.create({
     gap: 8,
     height: 48,
     borderRadius: 12,
-    backgroundColor: COLORS.accent,
+    backgroundColor: c.accent,
   },
   primaryButtonText: {
     fontSize: 15,
     fontWeight: "600",
-    color: COLORS.surface,
+    color: c.surface,
   },
   outlineButton: {
     flexDirection: "row",
@@ -703,17 +771,17 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: COLORS.accent,
+    borderColor: c.accent,
     backgroundColor: "transparent",
   },
   outlineButtonText: {
     fontSize: 15,
     fontWeight: "500",
-    color: COLORS.accent,
+    color: c.accent,
   },
   hint: {
     fontSize: 13,
-    color: COLORS.inkMuted,
+    color: c.inkMuted,
     marginTop: 10,
   },
   imageRow: {
@@ -725,7 +793,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 10,
-    backgroundColor: COLORS.paperDark,
+    backgroundColor: c.paperDark,
   },
   removeImageButton: {
     flexDirection: "row",
@@ -736,7 +804,7 @@ const styles = StyleSheet.create({
   },
   removeImageText: {
     fontSize: 14,
-    color: COLORS.danger,
+    color: c.danger,
     fontWeight: "500",
   },
   colorRow: {
@@ -749,41 +817,41 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: c.border,
   },
   colorInput: {
     flex: 1,
     height: 44,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: c.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     fontSize: 15,
     fontFamily: "monospace",
-    color: COLORS.ink,
+    color: c.ink,
   },
   smallButton: {
     paddingHorizontal: 14,
     height: 44,
     borderRadius: 10,
-    backgroundColor: COLORS.accent,
+    backgroundColor: c.accent,
     justifyContent: "center",
     alignItems: "center",
   },
   smallButtonSecondary: {
     backgroundColor: "transparent",
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: c.border,
   },
   smallButtonText: {
     fontSize: 14,
     fontWeight: "600",
-    color: COLORS.surface,
+    color: c.surface,
   },
   smallButtonTextSecondary: {
     fontSize: 14,
     fontWeight: "500",
-    color: COLORS.inkMuted,
+    color: c.inkMuted,
   },
   switchRow: {
     flexDirection: "row",
@@ -793,9 +861,34 @@ const styles = StyleSheet.create({
   },
   switchLabel: {
     fontSize: 15,
-    color: COLORS.ink,
+    color: c.ink,
   },
   footer: {
     height: 24,
+  },
+  // Full-screen variants of the canvas container. The framed styles above and these
+  // toggle on the SAME elements, so the PencilKitView is restyled, never remounted.
+  canvasFullScreen: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10,
+    backgroundColor: LIGHT.ink, // fixed dark bezel in both themes (LIGHT.ink is dark)
+    paddingTop: 50, // clear the status bar / notch so the toolbar is reachable
+  },
+  canvasFrameFull: {
+    flex: 1,
+    backgroundColor: c.surface,
+    overflow: "hidden",
+  },
+  canvasWrapperFull: {
+    flex: 1,
+    overflow: "hidden",
+  },
+  canvasFull: {
+    flex: 1,
+    backgroundColor: c.surface,
   },
 });

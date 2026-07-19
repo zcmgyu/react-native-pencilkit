@@ -48,8 +48,16 @@ public class ReactNativePencilKitModule: Module {
         view.setBoundaryThreshold(threshold ?? 128)
       }
 
+      Prop("boundaryOutlineDilation") { (view: ReactNativePencilKitView, value: Int?) in
+        view.setBoundaryOutlineDilation(value ?? 0)
+      }
+
       Prop("boundaryDebug") { (view: ReactNativePencilKitView, debug: Bool?) in
         view.setBoundaryDebug(debug ?? false)
+      }
+
+      Prop("pageTransformEnabled") { (view: ReactNativePencilKitView, enabled: Bool?) in
+        view.setPageTransformEnabled(enabled ?? true)
       }
     }
 
@@ -130,6 +138,13 @@ public class ReactNativePencilKitModule: Module {
       }
     }
 
+    // Reset the page transform to centered + fit
+    AsyncFunction("resetTransform") { (_: Int) in
+      await MainActor.run {
+        self.pencilKitView?.resetTransform()
+      }
+    }
+
     // Set canvas background color
     AsyncFunction("setCanvasBackgroundColor") { (_: Int, colorString: String) in
       await MainActor.run {
@@ -155,7 +170,10 @@ public class ReactNativePencilKitModule: Module {
     pencilKitView = view
   }
 
-  func unregisterCanvasView() {
+  func unregisterCanvasView(_ canvas: PKCanvasView) {
+    // Only clear if the departing canvas is the one currently registered — prevents a
+    // view being torn down from nil'ing refs a newer view just registered.
+    guard canvasView === canvas else { return }
     canvasView = nil
     pencilKitView = nil
     toolPicker = nil
@@ -406,7 +424,11 @@ public class ReactNativePencilKitModule: Module {
       return "FFFFFF" // Default to white
     }
 
-    return hexStringFromColor(canvasView.backgroundColor ?? UIColor.white)
+    // Resolve against the view's trait collection so a dynamic (light/dark) color
+    // reports the hex actually on screen, not whatever UITraitCollection.current is.
+    let bg = (canvasView.backgroundColor ?? UIColor.white)
+      .resolvedColor(with: canvasView.traitCollection)
+    return hexStringFromColor(bg)
   }
 
   // MARK: - Helper Methods

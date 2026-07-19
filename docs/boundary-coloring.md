@@ -43,7 +43,9 @@ If a coloring page has small gaps in its outlines (the artist's line didn't full
 1. Compute the distance from each white pixel to the nearest black (outline) pixel
 2. White pixels with distance ≤ `outlineDilation` become black (added to the outline)
 
-This effectively thickens all outlines before region detection, closing small gaps without significantly changing the region shapes. The `outlineDilation` parameter is passed to `buildRegionMap()` (default: 3).
+This effectively thickens all outlines before region detection, closing small gaps without significantly changing the region shapes. The `outlineDilation` parameter is passed to `buildRegionMap()` and is controlled by the `boundaryOutlineDilation` prop (**default: 0**).
+
+At `0`, colorable regions sit flush against the outline, so fills reach the stroke with no visible gap — best for clean, closed outlines. Raise it (e.g. `2`–`3`) for hand-drawn/imperfect outlines to bridge small gaps and stop color from leaking between adjacent regions.
 
 ### Step 3: Connected Component Labeling (CCL)
 
@@ -261,5 +263,6 @@ PencilKit's native UndoManager resets when `canvasView.drawing` is set (which ha
 | `boundaryImagePath` | `{ uri: string }` | — | Coloring page outline image |
 | `boundaryColoringEnabled` | `boolean` | `true` | Toggle boundary clipping |
 | `boundaryThreshold` | `number` | `128` | Grayscale threshold for outline detection (0-255) |
+| `boundaryOutlineDilation` | `number` | `0` | Pixels to dilate outlines before region detection. `0` = fills flush to the stroke; higher bridges gaps in imperfect outlines |
 | `boundaryDebug` | `boolean` | `false` | Show debug overlay for active region |
 | `onBoundaryImageLoad` | callback | — | Fires with `{ success, regionCount, width, height }` |

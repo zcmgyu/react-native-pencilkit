@@ -9,8 +9,7 @@ import UIKit
 // ExpoView is Expo's base class for native views exposed to React Native.
 //
 //  ReactNativePencilKitView (self — the root view exposed to React Native)
-//  └── scrollView (UIScrollView)           ← handles pan/zoom gestures
-//      └── contentView (UIView)            ← the zoomable container; all children scale together
+//  └── pageContainer (UIView)            ← the single transformable object; all children move together
 //          ├── backgroundImageView?       ← [0] shows the coloring page image (.scaleAspectFit)
 //          ├── coloredLayer?              ← [1] UIImageView holding all committed/baked strokes
 //          ├── canvasView (PKCanvasView)  ← [2] Apple's drawing canvas — only holds the LIVE stroke
@@ -25,12 +24,11 @@ import UIKit
 // This class conforms to multiple protocols:
 //   - PKCanvasViewDelegate: receives drawing events (stroke start/end/change)
 //   - PKToolPickerObserver: notified when the tool picker changes (currently unused but required)
-//   - UIScrollViewDelegate: provides the zoomable view for pinch-to-zoom
-public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPickerObserver, UIScrollViewDelegate {
+//   - UIGestureRecognizerDelegate: allows our custom gesture recognizers to work alongside PencilKit's
+public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPickerObserver, UIGestureRecognizerDelegate {
 
   // Core views — always present
-  private let scrollView = UIScrollView()
-  private let contentView = UIView()           // The single zoomable child inside scrollView
+  private let pageContainer = UIView()          // The single transformable object (background + strokes + canvas)
   private let canvasView = PKCanvasView()       // Apple's PencilKit drawing surface
   private var backgroundImageView: UIImageView? // Optional background image (coloring page)
 
@@ -78,7 +76,15 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
   // Props from React Native
   private(set) var boundaryColoringEnabled: Bool = true  // Toggle boundary mode on/off
   private var boundaryThreshold: Int = 128               // Grayscale threshold for outline detection
+  private var boundaryOutlineDilation: Int = 0           // Outline dilation for region detection (0 = fill flush to stroke)
   private var boundaryDebug: Bool = false                 // Show debug overlay
+  private(set) var pageTransformEnabled: Bool = true      // 2-finger pan/zoom/rotate on/off
+
+  // 2-touch gesture recognizers that transform the page. 1-finger touches are never
+  // claimed by these, so PencilKit drawing is unaffected.
+  private let pinchGR = UIPinchGestureRecognizer()
+  private let rotationGR = UIRotationGestureRecognizer()
+  private let panGR = UIPanGestureRecognizer()
 
   // Custom gesture recognizer that detects the touch point and immediately fails,
   // so PencilKit's own gesture recognizers can process the touch without interference.
@@ -105,44 +111,57 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
   // Called once when the view is created. Sets up the view hierarchy.
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
-    setupScrollView()
+    setupPageContainer()
     setupCanvasView()
   }
 
   // MARK: - Setup
 
-  private func setupScrollView() {
-    scrollView.delegate = self               // We implement UIScrollViewDelegate for zoom
-    scrollView.minimumZoomScale = 1.0        // No zoom out beyond 1x
-    scrollView.maximumZoomScale = 5.0        // Allow 5x zoom in
-    scrollView.backgroundColor = .gray       // Visible when canvas is smaller than scroll view
-    scrollView.showsHorizontalScrollIndicator = false
-    scrollView.showsVerticalScrollIndicator = false
-    addSubview(scrollView)                   // Add scrollView as a child of this view
+  private func setupPageContainer() {
+    backgroundColor = ReactNativePencilKitView.surroundColor  // Area around the page (follows light/dark)
+    pageContainer.backgroundColor = ReactNativePencilKitView.paperColor
+    addSubview(pageContainer)
+
+    pinchGR.addTarget(self, action: #selector(handlePinch(_:)))
+    rotationGR.addTarget(self, action: #selector(handleRotation(_:)))
+    panGR.addTarget(self, action: #selector(handlePan(_:)))
+    panGR.minimumNumberOfTouches = 2
+    panGR.maximumNumberOfTouches = 2
+    for gr in [pinchGR, rotationGR, panGR] as [UIGestureRecognizer] {
+      gr.delegate = self
+      addGestureRecognizer(gr)
+    }
+  }
+
+  // Dynamic colors that follow the system light/dark appearance. UIKit re-resolves
+  // these automatically when the trait collection changes — no observers needed.
+  private static let paperColor = UIColor { traits in
+    traits.userInterfaceStyle == .dark ? UIColor(white: 0.11, alpha: 1.0) : .white  // ~#1C1C1E vs white
+  }
+  private static let surroundColor = UIColor { traits in
+    traits.userInterfaceStyle == .dark ? UIColor(white: 0.0, alpha: 1.0) : .gray
   }
 
   private func setupCanvasView() {
-    // .anyInput allows both Apple Pencil AND finger drawing
+    // .anyInput allows both Apple Pencil AND finger drawing.
+    // No forced appearance — the canvas and PencilKit tool picker follow system light/dark.
     canvasView.drawingPolicy = .anyInput
-    canvasView.overrideUserInterfaceStyle = .light  // Force light mode for consistent appearance
     canvasView.isMultipleTouchEnabled = true
     canvasView.isOpaque = false              // Transparent so coloredLayer shows through
     canvasView.backgroundColor = UIColor.clear
     canvasView.delegate = self               // We implement PKCanvasViewDelegate
     canvasView.isUserInteractionEnabled = true
 
-    // Disable canvas's built-in scroll/zoom — our outer scrollView handles that instead.
-    // This way the background image and canvas zoom/pan together as one unit.
+    // Disable canvas's built-in scroll/zoom — the pageContainer's transform handles that instead.
+    // This way the background image and canvas pan/zoom/rotate together as one unit.
     canvasView.isScrollEnabled = false
     canvasView.minimumZoomScale = 1.0
     canvasView.maximumZoomScale = 1.0
 
     canvasView.drawing = PKDrawing()         // Start with an empty drawing
 
-    // Build the view hierarchy: contentView contains the canvas (and later, other layers)
-    contentView.backgroundColor = .white
-    contentView.addSubview(canvasView)
-    scrollView.addSubview(contentView)
+    // Build the view hierarchy: pageContainer holds the canvas (and later, other layers)
+    pageContainer.addSubview(canvasView)
 
     // Set up the zone touch detector.
     // When the user touches the canvas, this fires BEFORE PencilKit starts its stroke.
@@ -160,15 +179,60 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
   // We update all child frames to match the new size.
   override public func layoutSubviews() {
     super.layoutSubviews()
-    scrollView.frame = bounds                               // Fill the entire view
-    let contentSize = bounds.size
-    contentView.frame = CGRect(origin: .zero, size: contentSize)
-    scrollView.contentSize = contentSize                    // Tell scrollView how big the content is
-    canvasView.frame = contentView.bounds                   // Canvas fills the content area
-    backgroundImageView?.frame = contentView.bounds         // Background image fills the content area
-    coloredLayer?.frame = contentView.bounds                // Colored layer fills the content area
-    debugMaskOverlay?.frame = contentView.bounds            // Debug overlay fills the content area
-    maskLayer?.frame = canvasView.bounds                    // Mask matches canvas size
+    // Size the page to the image's aspect ratio (a square image → a square page),
+    // fit within the view and centered — so the object the user zooms/pans/rotates
+    // is the sheet of paper itself, not a device-sized rectangle. Falls back to the
+    // full view size when there is no image.
+    let pageSize = fittedPageSize(in: bounds.size)
+    let sizeChanged = pageContainer.bounds.size != pageSize
+    pageContainer.bounds = CGRect(origin: .zero, size: pageSize)
+
+    // If the view's size actually changed while a transform was active (e.g. device
+    // rotation while zoomed/panned), drop the transform so the page can't end up
+    // off-screen or with a distorted, misaligned mask.
+    if sizeChanged && !pageContainer.transform.isIdentity {
+      pageContainer.transform = .identity
+    }
+    if pageContainer.transform.isIdentity {
+      pageContainer.center = CGPoint(x: bounds.midX, y: bounds.midY)
+    }
+
+    canvasView.frame = pageContainer.bounds                 // Canvas fills the page
+    backgroundImageView?.frame = pageContainer.bounds
+    coloredLayer?.frame = pageContainer.bounds
+    debugMaskOverlay?.frame = pageContainer.bounds
+    maskLayer?.frame = canvasView.bounds
+  }
+
+  // Aspect-fit size of the active page image within `container`, preserving the
+  // image's aspect ratio. Returns `container` unchanged when there is no image.
+  private func fittedPageSize(in container: CGSize) -> CGSize {
+    guard let image = boundaryImage ?? backgroundImageView?.image else { return container }
+    return ReactNativePencilKitView.aspectFitSize(imageSize: image.size, in: container)
+  }
+
+  // Container size to precompute the canvas-map against. Uses the view's size, falling
+  // back to the screen size before the first layout (when `bounds` is still zero) so the
+  // map isn't built at full native image resolution. Call on the main thread.
+  private func sizeForCanvasMap() -> CGSize {
+    let size = bounds.size
+    return (size.width > 0 && size.height > 0) ? size : UIScreen.main.bounds.size
+  }
+
+  // Pure helper (thread-safe — no UIView access): the largest rect with `imageSize`'s
+  // aspect ratio that fits inside `container`. Falls back to `imageSize` when
+  // `container` is degenerate (e.g. bounds not laid out yet), which still yields the
+  // correct aspect ratio for the canvas-map precompute.
+  static func aspectFitSize(imageSize: CGSize, in container: CGSize) -> CGSize {
+    guard imageSize.width > 0, imageSize.height > 0 else { return container }
+    guard container.width > 0, container.height > 0 else { return imageSize }
+    let imageAspect = imageSize.width / imageSize.height
+    let containerAspect = container.width / container.height
+    if imageAspect > containerAspect {
+      return CGSize(width: container.width, height: container.width / imageAspect)
+    } else {
+      return CGSize(width: container.height * imageAspect, height: container.height)
+    }
   }
 
   // Called when this view is added to or removed from a parent view.
@@ -180,8 +244,14 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
       ReactNativePencilKitView.moduleInstance?.registerCanvasView(canvasView)
       ReactNativePencilKitView.moduleInstance?.registerPencilKitView(self)
     } else {
-      // View was removed — unregister
-      ReactNativePencilKitView.moduleInstance?.unregisterCanvasView()
+      // View was removed — unregister (only clears the module's refs if they still
+      // point at THIS view, so a departing view can't clobber a newer registration).
+      ReactNativePencilKitView.moduleInstance?.unregisterCanvasView(canvasView)
+      // Break the self <-> gesture-recognizer retain cycle so this view can deallocate.
+      // (self strongly owns the recognizers and is also their target.)
+      pinchGR.removeTarget(self, action: nil)
+      rotationGR.removeTarget(self, action: nil)
+      panGR.removeTarget(self, action: nil)
     }
   }
 
@@ -216,21 +286,24 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     }
   }
 
-  // Inserts the image as a UIImageView at the bottom of contentView's subview stack.
+  // Inserts the image as a UIImageView at the bottom of pageContainer's subview stack.
   private func setBackgroundImage(_ image: UIImage) {
     backgroundImageView?.removeFromSuperview()   // Remove old image if any
     let imageView = UIImageView(image: image)
     imageView.contentMode = .scaleAspectFit      // Maintain aspect ratio, fit within bounds
-    imageView.frame = contentView.bounds
-    contentView.insertSubview(imageView, at: 0)  // Insert at index 0 = behind everything
+    imageView.frame = pageContainer.bounds
+    pageContainer.insertSubview(imageView, at: 0)  // Insert at index 0 = behind everything
     backgroundImageView = imageView
     canvasView.backgroundColor = .clear          // Make canvas transparent so image shows through
+    // Resize the page to this image's aspect ratio (matters when there is no boundary image).
+    setNeedsLayout()
+    layoutIfNeeded()
   }
 
   private func clearBackgroundImage() {
     backgroundImageView?.removeFromSuperview()
     backgroundImageView = nil
-    canvasView.backgroundColor = .white          // Restore white background when no image
+    canvasView.backgroundColor = ReactNativePencilKitView.paperColor  // Restore paper (follows light/dark)
   }
 
   // MARK: - Boundary Coloring Props
@@ -247,6 +320,13 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
       return
     }
 
+    // Capture on the main thread — these are read on the background queue below.
+    // Before the first layout pass `bounds` is zero; fall back to the screen size so
+    // the canvas-map isn't precomputed at full native image resolution (aspect ratio
+    // is preserved either way, so masks still align once laid out).
+    let containerSize = sizeForCanvasMap()
+    let dilation = boundaryOutlineDilation
+
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       guard let data = try? Data(contentsOf: url),
             let image = UIImage(data: data)
@@ -261,13 +341,14 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
       // Build the region map on the background thread (CPU-intensive).
       // This identifies each enclosed white area as a separate "zone" with a unique ID.
       let builder = RegionMapBuilder()
-      builder.buildRegionMap(from: image, threshold: self?.boundaryThreshold ?? 128)
+      builder.buildRegionMap(from: image, threshold: self?.boundaryThreshold ?? 128, outlineDilation: dilation)
 
-      // Pre-compute a canvas-resolution lookup table.
-      // Maps each screen pixel to a zone ID, enabling instant mask generation later.
-      let canvasSize = self?.canvasView.bounds.size ?? CGSize(width: 360, height: 360)
+      // Pre-compute the canvas-resolution lookup table at the page's aspect-fit size
+      // (the size the canvas takes once laid out), so generated masks align with the
+      // canvas regardless of the device's aspect ratio.
+      let mapSize = ReactNativePencilKitView.aspectFitSize(imageSize: image.size, in: containerSize)
       let scale = UIScreen.main.scale
-      builder.precomputeCanvasMap(canvasSize: canvasSize, scale: scale)
+      builder.precomputeCanvasMap(canvasSize: mapSize, scale: scale)
 
       // Switch to main thread to update UI state
       DispatchQueue.main.async {
@@ -275,7 +356,12 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
         self.boundaryImage = image
         self.regionMapBuilder = builder
         self.currentRegionId = -1
+        self.zoneMaskCache = [:]            // masks from any previous image are now stale
         self.applyBoundaryColoring()
+        // Resize the page to the new image's aspect ratio, then re-center/fit.
+        self.setNeedsLayout()
+        self.layoutIfNeeded()
+        self.resetTransform()
         // Notify React Native that the image loaded successfully
         self.onBoundaryImageLoad([
           "success": true,
@@ -308,16 +394,38 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     let clamped = max(0, min(255, threshold))
     guard clamped != boundaryThreshold else { return }
     boundaryThreshold = clamped
+    rebuildRegionMap()
+  }
 
-    // Rebuild region map with new threshold on background thread
+  // Change the outline dilation used when detecting colorable regions.
+  // 0 keeps fills flush with the outline (no gap between color and stroke); higher
+  // values bridge small gaps in imperfect outlines so color can't leak between
+  // adjacent regions.
+  func setBoundaryOutlineDilation(_ value: Int) {
+    let clamped = max(0, value)
+    guard clamped != boundaryOutlineDilation else { return }
+    boundaryOutlineDilation = clamped
+    rebuildRegionMap()
+  }
+
+  // Rebuilds the region map + canvas-map from the current boundary image using the
+  // current threshold and dilation, then refreshes state. Heavy work runs off-main.
+  // Precomputes at the page's aspect-fit size so masks stay aligned with the canvas.
+  private func rebuildRegionMap() {
     guard let image = boundaryImage else { return }
+    let containerSize = sizeForCanvasMap()
+    let threshold = boundaryThreshold
+    let dilation = boundaryOutlineDilation
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       let builder = RegionMapBuilder()
-      builder.buildRegionMap(from: image, threshold: clamped)
+      builder.buildRegionMap(from: image, threshold: threshold, outlineDilation: dilation)
+      let mapSize = ReactNativePencilKitView.aspectFitSize(imageSize: image.size, in: containerSize)
+      builder.precomputeCanvasMap(canvasSize: mapSize, scale: UIScreen.main.scale)
       DispatchQueue.main.async {
         guard let self = self else { return }
         self.regionMapBuilder = builder
         self.currentRegionId = -1
+        self.zoneMaskCache = [:]
         self.canvasView.layer.mask = nil
         self.maskLayer = nil
         self.updateDebugOverlay()
@@ -347,17 +455,17 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     // It sits above the background but below the canvas in the view hierarchy.
     if coloredLayer == nil {
       let layer = UIImageView()
-      layer.frame = contentView.bounds
+      layer.frame = pageContainer.bounds
       layer.isUserInteractionEnabled = false   // Touches pass through to the canvas
       layer.backgroundColor = .clear           // Transparent so background shows through
       // Insert above background (index 0) but below canvas
       let insertIndex = backgroundImageView != nil ? 1 : 0
-      contentView.insertSubview(layer, at: insertIndex)
+      pageContainer.insertSubview(layer, at: insertIndex)
       coloredLayer = layer
     }
 
     canvasView.backgroundColor = .clear
-    contentView.backgroundColor = .white
+    pageContainer.backgroundColor = ReactNativePencilKitView.paperColor
   }
 
   // Returns a cached CGImage mask for a zone. Generates it on first use (~1ms).
@@ -436,8 +544,10 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     // with .destinationIn blend mode. This keeps stroke pixels only where the mask has alpha > 0.
     UIGraphicsBeginImageContextWithOptions(size, false, scale)  // false = transparent background
     strokeImage.draw(at: .zero)
+    // Draw the zone mask scaled to fill the canvas rect (not at its natural size), so
+    // it stays aligned even if the precompute size differs slightly from the canvas.
     UIImage(cgImage: zoneMask, scale: scale, orientation: .up)
-      .draw(at: .zero, blendMode: .destinationIn, alpha: 1.0)
+      .draw(in: CGRect(origin: .zero, size: size), blendMode: .destinationIn, alpha: 1.0)
     let maskedStroke = UIGraphicsGetImageFromCurrentImageContext()
     UIGraphicsEndImageContext()
 
@@ -528,10 +638,10 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
 
     let overlay = UIImageView(image: debugImage)
     overlay.contentMode = .scaleAspectFit
-    overlay.frame = contentView.bounds
+    overlay.frame = pageContainer.bounds
     overlay.isUserInteractionEnabled = false  // Touches pass through
     let insertIndex = backgroundImageView != nil ? 1 : 0
-    contentView.insertSubview(overlay, at: insertIndex)
+    pageContainer.insertSubview(overlay, at: insertIndex)
     debugMaskOverlay = overlay
   }
 
@@ -605,7 +715,7 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
 
   // MARK: - Export
 
-  // Captures the entire contentView (background + colored strokes + canvas) as a PNG image.
+  // Captures the entire pageContainer (background + colored strokes + canvas) as a PNG image.
   // Hides the debug overlay during capture so it doesn't appear in the export.
   func captureImageWithDrawing() -> String {
     let debugWasVisible = debugMaskOverlay?.isHidden == false
@@ -613,9 +723,9 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
 
     // UIGraphicsImageRenderer creates a bitmap context at the view's scale.
     // drawHierarchy renders the ENTIRE view hierarchy (all subviews) into it.
-    let renderer = UIGraphicsImageRenderer(bounds: contentView.bounds)
+    let renderer = UIGraphicsImageRenderer(bounds: pageContainer.bounds)
     let image = renderer.image { _ in
-      contentView.drawHierarchy(in: contentView.bounds, afterScreenUpdates: true)
+      pageContainer.drawHierarchy(in: pageContainer.bounds, afterScreenUpdates: true)
     }
 
     if debugWasVisible {
@@ -672,12 +782,136 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     emitUndoRedoStateChanges()
   }
 
-  // MARK: - UIScrollViewDelegate
+  // MARK: - Page Transform
 
-  // Tells the scroll view which subview to zoom. We zoom the contentView,
-  // which contains the background image, colored layer, and canvas together.
-  public func viewForZooming(in _: UIScrollView) -> UIView? {
-    return contentView
+  // Cancels any in-flight PencilKit stroke by bouncing its drawing recognizer.
+  // Called when a 2-finger gesture begins so a transform never leaves a stray dot.
+  private func cancelActiveStroke() {
+    let g = canvasView.drawingGestureRecognizer
+    g.isEnabled = false
+    g.isEnabled = true
+  }
+
+  // Enables/disables the 2-finger transform gestures. When disabled, the page snaps
+  // back to identity (centered + fit).
+  func setPageTransformEnabled(_ enabled: Bool) {
+    pageTransformEnabled = enabled
+    pinchGR.isEnabled = enabled
+    rotationGR.isEnabled = enabled
+    panGR.isEnabled = enabled
+    if !enabled { resetTransform() }
+  }
+
+  // Animates the page back to centered + aspect-fit (identity transform).
+  func resetTransform() {
+    UIView.animate(withDuration: 0.25) {
+      self.pageContainer.transform = .identity
+      self.pageContainer.center = CGPoint(x: self.bounds.midX, y: self.bounds.midY)
+    }
+  }
+
+  @objc private func handlePinch(_ g: UIPinchGestureRecognizer) {
+    guard pageTransformEnabled else { return }
+    switch g.state {
+    case .began:
+      cancelActiveStroke()
+    case .changed:
+      pageContainer.transform = pageContainer.transform.scaledBy(x: g.scale, y: g.scale)
+      g.scale = 1.0
+    case .ended, .cancelled:
+      normalizeTransform()
+    default:
+      break
+    }
+  }
+
+  @objc private func handleRotation(_ g: UIRotationGestureRecognizer) {
+    guard pageTransformEnabled else { return }
+    switch g.state {
+    case .began:
+      cancelActiveStroke()
+    case .changed:
+      pageContainer.transform = pageContainer.transform.rotated(by: g.rotation)
+      g.rotation = 0
+    case .ended, .cancelled:
+      normalizeTransform()
+    default:
+      break
+    }
+  }
+
+  @objc private func handlePan(_ g: UIPanGestureRecognizer) {
+    guard pageTransformEnabled else { return }
+    switch g.state {
+    case .began:
+      cancelActiveStroke()
+    case .changed:
+      let t = g.translation(in: self)
+      pageContainer.center = CGPoint(x: pageContainer.center.x + t.x,
+                                     y: pageContainer.center.y + t.y)
+      g.setTranslation(.zero, in: self)
+    case .ended, .cancelled:
+      normalizeTransform()
+    default:
+      break
+    }
+  }
+
+  // Constants
+  private let minScale: CGFloat = 0.5
+  private let maxScale: CGFloat = 5.0
+  private let rotationSnapRadians: CGFloat = 5.0 * .pi / 180.0  // soft-snap within 5°
+  private let onScreenMargin: CGFloat = 40.0                    // page always at least this visible
+
+  // Normalizes the page transform after a gesture ends:
+  //   - clamps scale to [minScale, maxScale]
+  //   - soft-snaps rotation to 0° when within rotationSnapRadians
+  //   - keeps the page partly on-screen (clampTranslation)
+  private func normalizeTransform() {
+    var t = pageContainer.transform
+
+    // Current scale = magnitude of the transform's first column.
+    let scale = sqrt(t.a * t.a + t.c * t.c)
+    if scale > 0 {
+      let clamped = min(max(scale, minScale), maxScale)
+      if clamped != scale {
+        let factor = clamped / scale
+        t = t.scaledBy(x: factor, y: factor)
+      }
+    }
+
+    // Soft-snap rotation to upright.
+    let angle = atan2(t.b, t.a)
+    if abs(angle) < rotationSnapRadians {
+      t = t.rotated(by: -angle)
+    }
+
+    UIView.animate(withDuration: 0.2) {
+      self.pageContainer.transform = t
+      self.clampTranslation()
+    }
+  }
+
+  // Keeps at least onScreenMargin points of the page's (transformed) bounding box
+  // inside the view on each axis, so the page can never be dragged fully off-screen.
+  private func clampTranslation() {
+    let f = pageContainer.frame               // frame accounts for the current transform
+    var center = pageContainer.center
+    let minX = onScreenMargin - f.width / 2
+    let maxX = bounds.width - onScreenMargin + f.width / 2
+    let minY = onScreenMargin - f.height / 2
+    let maxY = bounds.height - onScreenMargin + f.height / 2
+    center.x = min(max(center.x, minX), maxX)
+    center.y = min(max(center.y, minY), maxY)
+    pageContainer.center = center
+  }
+
+  public func gestureRecognizer(_ g: UIGestureRecognizer,
+                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+    let mine: Set<ObjectIdentifier> = [ObjectIdentifier(pinchGR),
+                                       ObjectIdentifier(rotationGR),
+                                       ObjectIdentifier(panGR)]
+    return mine.contains(ObjectIdentifier(g)) && mine.contains(ObjectIdentifier(other))
   }
 
   // MARK: - PKToolPickerObserver
