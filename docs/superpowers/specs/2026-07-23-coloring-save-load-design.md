@@ -47,6 +47,7 @@ string-based API):
 ```json
 {
   "version": 1,
+  "scale": 3.0,
   "current": "<base64 PNG or ''>",
   "undo": ["<base64 PNG or ''>", "..."],
   "redo": ["<base64 PNG or ''>", "..."]
@@ -56,6 +57,11 @@ string-based API):
 - Empty string `""` represents a `nil` snapshot (the first undo entry is
   legitimately `nil` — the blank state before any color). Preserving `nil`s keeps
   undo semantics exact.
+- `scale` is the Retina scale the snapshots were rendered at. PNG data carries only
+  pixels (no scale hint) and `UIImage(data:)` defaults to scale `1.0`, so restore
+  must re-apply this scale — otherwise decoded images have an inflated point-size
+  that corrupts the next stroke composite. Absent in pre-`scale` blobs; restore
+  falls back to the current screen scale.
 - `undo` / `redo` arrays are in stack order (index 0 = bottom of stack).
 - When an undo cap is active, `undo` (and therefore `redo`) carry at most
   `maxUndoSteps` entries.

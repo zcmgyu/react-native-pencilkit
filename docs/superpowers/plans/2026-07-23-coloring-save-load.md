@@ -451,7 +451,12 @@ cd example && npx expo run:ios
   5. Tap **Load data** — the 3 colored regions reappear.
   6. Tap **Undo** three times — color is removed region-by-region back to blank.
   7. Tap **Redo** three times — color returns region-by-region.
-  Expected: picture and full undo/redo history behave exactly as before the save.
+  8. **Color a NEW region after loading** — the 3 restored regions stay intact (not
+     blown up/cropped), and the new color composites correctly on top. This guards
+     the Retina-scale round-trip (the blob records the capture scale; restore
+     re-applies it because `UIImage(data:)` defaults to scale 1.0).
+  Expected: picture and full undo/redo history behave exactly as before the save,
+  and resuming coloring preserves the restored artwork.
 
 - [ ] **Step 3: Capped-history behavior.**
   1. Turn **Limit undo to 10 steps** ON.
