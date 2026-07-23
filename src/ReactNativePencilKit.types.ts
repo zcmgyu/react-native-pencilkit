@@ -73,6 +73,12 @@ export interface PencilKitViewProps {
   boundaryDebug?: boolean;
   /** Enable 2-finger pan/zoom/rotate of the page. 1 finger always draws. Default: true. */
   pageTransformEnabled?: boolean;
+  /**
+   * Maximum number of undo steps retained in coloring mode. 0 (default) keeps the
+   * full history; a positive value caps it (oldest steps are dropped). A smaller
+   * cap also reduces the size of getColoringData() output.
+   */
+  maxUndoSteps?: number;
   onDrawStart?: (event: NativeEvent<DrawStartEvent>) => void;
   onDrawEnd?: (event: NativeEvent<DrawEndEvent>) => void;
   onDrawChange?: (event: NativeEvent<DrawChangeEvent>) => void;
@@ -132,6 +138,17 @@ export interface PencilKitViewRef {
   captureImageWithDrawing(): Promise<string>;
   getCanvasDataAsBase64(): Promise<string>;
   setCanvasDataFromBase64(base64String: string): Promise<boolean>;
+  /**
+   * Serialize the full coloring-mode state (current picture + undo/redo history)
+   * to a base64 string. Returns "" when not in boundary/coloring mode.
+   */
+  getColoringData(): Promise<string>;
+  /**
+   * Restore coloring-mode state produced by getColoringData(). Must be called
+   * AFTER the boundary image has loaded (onBoundaryImageLoad). Returns false on
+   * malformed data or if the coloring layer isn't ready.
+   */
+  setColoringData(base64String: string): Promise<boolean>;
   canUndo(): Promise<boolean>;
   canRedo(): Promise<boolean>;
   setCanvasBackgroundColor(colorString: string): Promise<void>;
