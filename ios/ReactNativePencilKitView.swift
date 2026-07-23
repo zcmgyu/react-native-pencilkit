@@ -58,6 +58,10 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
   private var coloredSnapshots: [UIImage?] = []  // Undo stack
   private var redoSnapshots: [UIImage?] = []     // Redo stack (cleared on new stroke)
 
+  // Undo-depth cap. 0 = unlimited (full history). A positive value caps the
+  // number of undo snapshots kept; the oldest are dropped when exceeded.
+  private var maxUndoSteps: Int = 0
+
   // Guard flag: when true, delegate callbacks from canvasView are ignored.
   // This prevents infinite loops when we clear the canvas after committing a stroke,
   // because clearing triggers canvasViewDrawingDidChange which would try to commit again.
@@ -530,6 +534,8 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     coloredSnapshots.append(coloredLayer?.image)
     // New action invalidates the redo stack
     redoSnapshots = []
+    // Enforce the undo-depth cap (drops oldest snapshots when set).
+    trimUndoStackIfNeeded()
 
     let size = canvasView.bounds.size
     let scale = UIScreen.main.scale  // e.g., 3.0 on iPhone 15 Pro (3x Retina)
@@ -606,6 +612,78 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     redoSnapshots = []
     coloredLayer?.image = nil
     emitUndoRedoStateChanges()
+  }
+
+  // Sets the maximum number of undo steps to retain (0 = unlimited).
+  // Trims the current stack immediately so the cap takes effect right away.
+  func setMaxUndoSteps(_ value: Int) {
+    maxUndoSteps = max(0, value)
+    trimUndoStackIfNeeded()
+    emitUndoRedoStateChanges()
+  }
+
+  // Drops the oldest undo snapshots when a cap is active. No-op when unlimited.
+  private func trimUndoStackIfNeeded() {
+    guard maxUndoSteps > 0, coloredSnapshots.count > maxUndoSteps else { return }
+    coloredSnapshots.removeFirst(coloredSnapshots.count - maxUndoSteps)
+  }
+
+  // MARK: - Coloring State Save / Load
+
+  // Serialization format version for the coloring-state blob.
+  private static let coloringStateVersion = 1
+
+  // Serializes the full coloring state — current picture plus the undo and redo
+  // snapshot stacks — into a versioned JSON container, base64-encoded to a single
+  // string. Each snapshot is a base64 PNG; an empty string represents a nil
+  // snapshot (e.g. the blank state at the bottom of the undo stack).
+  // Returns "" when not usable (boundary coloring disabled or no coloredLayer yet).
+  func serializeColoringState() -> String {
+    guard boundaryColoringEnabled, coloredLayer != nil else { return "" }
+
+    func encode(_ image: UIImage?) -> String {
+      guard let image = image, let data = image.pngData() else { return "" }
+      return data.base64EncodedString()
+    }
+
+    let container: [String: Any] = [
+      "version": ReactNativePencilKitView.coloringStateVersion,
+      "current": encode(coloredLayer?.image),
+      "undo": coloredSnapshots.map(encode),
+      "redo": redoSnapshots.map(encode),
+    ]
+
+    guard let json = try? JSONSerialization.data(withJSONObject: container) else { return "" }
+    return json.base64EncodedString()
+  }
+
+  // Restores a coloring state produced by serializeColoringState(). Repopulates the
+  // undo/redo stacks and current picture, applies the current undo cap, and refreshes
+  // the JS undo/redo availability. Returns false on malformed data or if coloredLayer
+  // isn't ready — so this must be called AFTER the boundary image has loaded.
+  @discardableResult
+  func restoreColoringState(_ base64: String) -> Bool {
+    guard coloredLayer != nil,
+          let json = Data(base64Encoded: base64),
+          let obj = try? JSONSerialization.jsonObject(with: json) as? [String: Any]
+    else { return false }
+
+    func decode(_ value: Any?) -> UIImage? {
+      guard let s = value as? String, !s.isEmpty,
+            let data = Data(base64Encoded: s) else { return nil }
+      return UIImage(data: data)
+    }
+
+    let currentImage = decode(obj["current"])
+    let undo: [UIImage?] = (obj["undo"] as? [Any])?.map(decode) ?? []
+    let redo: [UIImage?] = (obj["redo"] as? [Any])?.map(decode) ?? []
+
+    coloredSnapshots = undo
+    redoSnapshots = redo
+    coloredLayer?.image = currentImage
+    trimUndoStackIfNeeded()
+    emitUndoRedoStateChanges()
+    return true
   }
 
   // Tears down all boundary coloring state. Called when the boundary image is removed.
