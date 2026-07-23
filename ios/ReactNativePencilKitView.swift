@@ -648,6 +648,11 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
 
     let container: [String: Any] = [
       "version": ReactNativePencilKitView.coloringStateVersion,
+      // The Retina scale the snapshots were rendered at. PNG data carries only
+      // pixels (no scale hint), so we must record it and re-apply it on restore —
+      // otherwise decoded images default to scale 1.0 and their point-size ends up
+      // scale-times too large, corrupting the next composite in commitCurrentStroke.
+      "scale": Double(UIScreen.main.scale),
       "current": encode(coloredLayer?.image),
       "undo": coloredSnapshots.map(encode),
       "redo": redoSnapshots.map(encode),
@@ -668,10 +673,15 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
           let obj = try? JSONSerialization.jsonObject(with: json) as? [String: Any]
     else { return false }
 
+    // Decode PNG snapshots at the scale they were captured at. Falls back to the
+    // current screen scale for blobs saved before "scale" was recorded. Decoding at
+    // the wrong scale leaves images with an inflated point-size that corrupts the
+    // next stroke composite (coloredLayer?.image?.draw(at:) in commitCurrentStroke).
+    let scale = (obj["scale"] as? Double).map { CGFloat($0) } ?? UIScreen.main.scale
     func decode(_ value: Any?) -> UIImage? {
       guard let s = value as? String, !s.isEmpty,
             let data = Data(base64Encoded: s) else { return nil }
-      return UIImage(data: data)
+      return UIImage(data: data, scale: scale)
     }
 
     let currentImage = decode(obj["current"])
