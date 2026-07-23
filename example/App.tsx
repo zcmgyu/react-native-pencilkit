@@ -36,6 +36,7 @@ import {
 const { width: screenWidth } = Dimensions.get("window");
 const CANVAS_SIZE = Math.min(screenWidth - 40, 360);
 const HIT_SLOP = { top: 12, bottom: 12, left: 12, right: 12 };
+const UNDO_CAP = 10;
 
 // Default drawing tool. Falls back: watercolor -> marker -> pen (iOS < 17).
 // Shared by initial setup and the full-screen toggle (re-asserted so the native
@@ -109,6 +110,7 @@ export default function App() {
   const [boundaryDebug, setBoundaryDebug] = useState(false);
   const [boundaryRegionCount, setBoundaryRegionCount] = useState(0);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [limitUndo, setLimitUndo] = useState(false);
 
   useEffect(() => {
     const setupTimer = setTimeout(() => {
@@ -270,26 +272,27 @@ export default function App() {
   };
 
   const handleSaveCanvasData = async () => {
-    if (pencilKitRef.current) {
-      try {
-        const data = await pencilKitRef.current.getCanvasDataAsBase64();
-        setSavedCanvasData(data);
-        Alert.alert(
-          "Saved",
-          `Canvas data saved (${Math.round(data.length / 1024)} KB)`
-        );
-      } catch (_) {
-        Alert.alert("Error", "Failed to save canvas data");
-      }
+    if (!pencilKitRef.current) return;
+    try {
+      const data = boundaryImage
+        ? await pencilKitRef.current.getColoringData()
+        : await pencilKitRef.current.getCanvasDataAsBase64();
+      setSavedCanvasData(data);
+      Alert.alert(
+        "Saved",
+        `Canvas data saved (${Math.round(data.length / 1024)} KB)`
+      );
+    } catch (_) {
+      Alert.alert("Error", "Failed to save canvas data");
     }
   };
 
   const handleLoadCanvasData = async () => {
     if (pencilKitRef.current && savedCanvasData) {
       try {
-        const ok = await pencilKitRef.current.setCanvasDataFromBase64(
-          savedCanvasData
-        );
+        const ok = boundaryImage
+          ? await pencilKitRef.current.setColoringData(savedCanvasData)
+          : await pencilKitRef.current.setCanvasDataFromBase64(savedCanvasData);
         if (ok) {
           Alert.alert("Loaded", "Canvas data restored from saved data.");
         } else {
@@ -426,6 +429,7 @@ export default function App() {
                 boundaryColoringEnabled={boundaryColoringEnabled}
                 boundaryDebug={boundaryDebug}
                 pageTransformEnabled
+                maxUndoSteps={limitUndo ? UNDO_CAP : 0}
                 onDrawStart={handleDrawStart}
                 onDrawEnd={handleDrawEnd}
                 onDrawChange={handleDrawChange}
@@ -491,6 +495,14 @@ export default function App() {
                   value={boundaryDebug}
                   onValueChange={setBoundaryDebug}
                   trackColor={{ true: c.success }}
+                />
+              </View>
+              <View style={styles.switchRow}>
+                <Text style={styles.switchLabel}>Limit undo to {UNDO_CAP} steps</Text>
+                <Switch
+                  value={limitUndo}
+                  onValueChange={setLimitUndo}
+                  trackColor={{ true: c.accent }}
                 />
               </View>
               {boundaryRegionCount > 0 ? (
