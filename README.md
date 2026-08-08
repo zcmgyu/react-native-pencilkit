@@ -15,6 +15,7 @@ PencilKit-powered drawing canvas for **React Native / Expo** with Apple Pencil s
 - **Export drawing** as base64 PNG with `captureDrawing()`
 - **Export image + drawing** as base64 PNG with `captureImageWithDrawing()` - captures both background image and drawings together
 - **Save / restore strokes** as base64 data with `getCanvasDataAsBase64()` and `setCanvasDataFromBase64()`
+- **Save / restore coloring state** — persist the full coloring-mode picture *and* its undo/redo history with `getColoringData()` / `setColoringData()`, with an optional `maxUndoSteps` cap
 - **Canvas background color** getters/setters and a native **color picker**
 - **Default tool selection** - Set the initial tool when setting up the tool picker
 
@@ -183,6 +184,8 @@ export interface PencilKitViewRef {
   captureImageWithDrawing(): Promise<string>; // base64 PNG (background image + drawing)
   getCanvasDataAsBase64(): Promise<string>;
   setCanvasDataFromBase64(base64String: string): Promise<boolean>;
+  getColoringData(): Promise<string>; // base64: coloring picture + undo/redo history ("" if not in coloring mode)
+  setColoringData(base64String: string): Promise<boolean>; // restore; call AFTER onBoundaryImageLoad
   canUndo(): Promise<boolean>;
   canRedo(): Promise<boolean>;
   setCanvasBackgroundColor(colorString: string): Promise<void>; // e.g. "#FFFFFF" or "FFFFFF"
@@ -202,6 +205,8 @@ export interface PencilKitViewRef {
 | `captureImageWithDrawing`| `()`                | `Promise<string>`    | Capture the background image + drawing as a base64 PNG image (complete visual output) |
 | `getCanvasDataAsBase64`  | `()`                | `Promise<string>`    | Get the current drawing data as base64       |
 | `setCanvasDataFromBase64`| `base64: string`    | `Promise<boolean>`   | Load a drawing from base64 data              |
+| `getColoringData`        | `()`                | `Promise<string>`    | Serialize the full coloring-mode state (picture + undo/redo history) to base64. Returns `""` when not in boundary/coloring mode |
+| `setColoringData`        | `base64: string`    | `Promise<boolean>`   | Restore coloring-mode state from `getColoringData()`. Call **after** `onBoundaryImageLoad`; returns `false` on malformed data or if the coloring layer isn't ready |
 | `canUndo`                | `()`                | `Promise<boolean>`   | Check if undo is currently available         |
 | `canRedo`                | `()`                | `Promise<boolean>`   | Check if redo is currently available         |
 | `setCanvasBackgroundColor`| `color: string`    | `Promise<void>`      | Set canvas background color (`RRGGBB` / hex) |
@@ -233,6 +238,22 @@ const base64Png = await ref.current?.captureDrawing();
 // Export image + drawing as base64 PNG (includes background image if set)
 const base64ImageWithDrawing = await ref.current?.captureImageWithDrawing();
 // Use it: `data:image/png;base64,${base64ImageWithDrawing}`
+
+// --- Coloring-mode save / restore (boundary coloring) ---
+
+// Save: full coloring state incl. undo/redo history ("" if not in coloring mode)
+const coloringState = await ref.current?.getColoringData();
+
+// Restore: MUST run after the boundary image has loaded (onBoundaryImageLoad),
+// otherwise the coloring layer isn't ready and it returns false.
+<PencilKitView
+  boundaryImagePath={{ uri }}
+  boundaryColoringEnabled
+  maxUndoSteps={20} // optional: cap history (0 = unlimited)
+  onBoundaryImageLoad={async () => {
+    await ref.current?.setColoringData(coloringState);
+  }}
+/>
 ```
 
 ### Setting Default Tool
@@ -396,6 +417,7 @@ export interface PencilKitViewProps {
 | `style`              | `any`                                            | Style object for the canvas view                                                                                                                             |
 | `imagePath`          | `{ uri: string }`                                | Optional background image. When unset, the canvas uses a white background. _Note:_ for local assets (e.g. `require('./assets/image.png')`), resolve the URI using [`resolveAssetSource()`](https://reactnative.dev/docs/image#resolveassetsource) before passing it. |
 | `pageTransformEnabled` | `boolean`                                      | Enable 2-finger pan / zoom / rotate of the page (one finger always draws). Default `true`. Set `false` to lock the page. |
+| `maxUndoSteps`       | `number`                                         | Maximum undo steps retained in coloring mode. `0` (default) keeps the full history; a positive value caps it (oldest steps dropped). A smaller cap also shrinks `getColoringData()` output. |
 | `onDrawStart`        | `(event: NativeEvent<DrawStartEvent>) => void`   | Called when the user starts drawing                                                                                                                          |
 | `onDrawEnd`          | `(event: NativeEvent<DrawEndEvent>) => void`     | Called when the user finishes a drawing gesture                                                                                                             |
 | `onDrawChange`       | `(event: NativeEvent<DrawChangeEvent>) => void`  | Called whenever the drawing content changes                                                                                                                 |
