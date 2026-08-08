@@ -143,6 +143,37 @@ export const PencilKitView = React.forwardRef<
         }
         return false;
       },
+      getColoringData: async (): Promise<string> => {
+        if (
+          Platform.OS === "ios" &&
+          ReactNativePencilKit &&
+          viewRef.current
+        ) {
+          const viewTag = findNodeHandle(viewRef.current);
+          if (viewTag) {
+            return await ReactNativePencilKit.getColoringData(viewTag);
+          }
+        }
+        return "";
+      },
+      setColoringData: async (
+        base64String: string
+      ): Promise<boolean> => {
+        if (
+          Platform.OS === "ios" &&
+          ReactNativePencilKit &&
+          viewRef.current
+        ) {
+          const viewTag = findNodeHandle(viewRef.current);
+          if (viewTag) {
+            return await ReactNativePencilKit.setColoringData(
+              viewTag,
+              base64String
+            );
+          }
+        }
+        return false;
+      },
       canUndo: async (): Promise<boolean> => {
         if (
           Platform.OS === "ios" &&

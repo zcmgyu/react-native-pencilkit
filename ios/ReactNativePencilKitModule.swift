@@ -59,6 +59,10 @@ public class ReactNativePencilKitModule: Module {
       Prop("pageTransformEnabled") { (view: ReactNativePencilKitView, enabled: Bool?) in
         view.setPageTransformEnabled(enabled ?? true)
       }
+
+      Prop("maxUndoSteps") { (view: ReactNativePencilKitView, value: Int?) in
+        view.setMaxUndoSteps(value ?? 0)
+      }
     }
 
     // Setup tool picker for a specific canvas
@@ -114,6 +118,20 @@ public class ReactNativePencilKitModule: Module {
     AsyncFunction("setCanvasDataFromBase64") { (_: Int, base64String: String) -> Bool in
       return await MainActor.run {
         self.setCanvasDataFromBase64(base64String: base64String)
+      }
+    }
+
+    // Get full coloring state (picture + undo/redo history) as base64
+    AsyncFunction("getColoringData") { (_: Int) -> String in
+      return await MainActor.run {
+        self.pencilKitView?.serializeColoringState() ?? ""
+      }
+    }
+
+    // Restore full coloring state from base64 (produced by getColoringData)
+    AsyncFunction("setColoringData") { (_: Int, base64String: String) -> Bool in
+      return await MainActor.run {
+        self.pencilKitView?.restoreColoringState(base64String) ?? false
       }
     }
 
