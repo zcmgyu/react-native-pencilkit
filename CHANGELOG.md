@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/zcmgyu/react-native-pencilkit/compare/v1.2.0...v1.3.0) (2026-08-08)
+
+
+### Features
+
+* save/load data + save image ([#18](https://github.com/zcmgyu/react-native-pencilkit/issues/18)) ([2aacbfc](https://github.com/zcmgyu/react-native-pencilkit/commit/2aacbfc1f684fde26fb9e0f69970cfc3af2af09c))
+
 ## [1.2.0](https://github.com/zcmgyu/react-native-pencilkit/compare/v1.1.0...v1.2.0) (2026-04-17)
 
 
