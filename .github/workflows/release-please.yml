@@ -2,6 +2,10 @@ on:
   push:
     branches:
       - main
+  # Allows re-running just the npm publish phase if it failed after a
+  # release was already created (release-please won't re-emit
+  # release_created on a rerun once the release/tag exists).
+  workflow_dispatch:
 
 name: release-please
 
@@ -23,19 +27,21 @@ jobs:
       # The logic below handles the npm publication:
       - uses: actions/checkout@v6
         # these if statements ensure that a publication only occurs when
-        # a new release is created:
-        if: ${{ steps.release.outputs.release_created }}
+        # a new release is created, OR when the workflow is manually
+        # dispatched to retry a publish that failed after release:
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
       # Setup .npmrc file to publish to npm
       - uses: actions/setup-node@v6
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
       - run: npm run build
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
 
