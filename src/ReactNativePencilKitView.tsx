@@ -254,6 +254,18 @@ export const PencilKitView = React.forwardRef<
           }
         }
       },
+      setToolPickerVisible: async (visible: boolean) => {
+        if (
+          Platform.OS === "ios" &&
+          ReactNativePencilKit &&
+          viewRef.current
+        ) {
+          const viewTag = findNodeHandle(viewRef.current);
+          if (viewTag) {
+            await ReactNativePencilKit.setToolPickerVisible(viewTag, visible);
+          }
+        }
+      },
     }),
     []
   );

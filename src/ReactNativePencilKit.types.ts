@@ -156,4 +156,12 @@ export interface PencilKitViewRef {
   showColorPicker(): Promise<void>;
   /** Animate the page back to centered + aspect-fit (identity transform). */
   resetTransform(): Promise<void>;
+  /**
+   * Show or hide the floating tool picker.
+   *
+   * PKToolPicker is hosted in its own UIWindow above the app's view hierarchy, so it
+   * draws on top of presented modals such as the iOS share sheet. Hide it before
+   * presenting one and show it again afterwards.
+   */
+  setToolPickerVisible(visible: boolean): Promise<void>;
 }
