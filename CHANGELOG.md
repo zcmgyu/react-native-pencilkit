@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/zcmgyu/react-native-pencilkit/compare/v1.3.0...v1.4.0) (2026-08-20)
+
+
+### Features
+
+* add setToolPickerVisible to show/hide the tool picker ([#21](https://github.com/zcmgyu/react-native-pencilkit/issues/21)) ([3e176d1](https://github.com/zcmgyu/react-native-pencilkit/commit/3e176d1d3126f163264b0aa767027e5de3d89c5c))
+
 ## [1.3.0](https://github.com/zcmgyu/react-native-pencilkit/compare/v1.2.0...v1.3.0) (2026-08-08)
 
 
