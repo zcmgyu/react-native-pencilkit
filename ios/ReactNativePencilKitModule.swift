@@ -163,6 +163,15 @@ public class ReactNativePencilKitModule: Module {
       }
     }
 
+    // Show or hide the floating tool picker. PKToolPicker lives in its own UIWindow
+    // above the app's view hierarchy, so it draws over modals such as a share sheet.
+    // Callers hide it before presenting one and show it again afterwards.
+    AsyncFunction("setToolPickerVisible") { (_: Int, visible: Bool) in
+      await MainActor.run {
+        self.setToolPickerVisible(visible)
+      }
+    }
+
     // Set canvas background color
     AsyncFunction("setCanvasBackgroundColor") { (_: Int, colorString: String) in
       await MainActor.run {
@@ -227,6 +236,25 @@ public class ReactNativePencilKitModule: Module {
 
     // Get the undo manager from canvas view
     undoManager = canvasView.undoManager
+  }
+
+  /// Toggles the tool picker.
+  ///
+  /// PKToolPicker is only visible while its associated view is first responder, so
+  /// hiding means resigning first responder as well -- otherwise the picker reappears
+  /// as soon as anything nudges the responder chain. Showing restores both.
+  private func setToolPickerVisible(_ visible: Bool) {
+    guard let canvasView = canvasView, let toolPicker = toolPicker else {
+      return
+    }
+
+    if visible {
+      toolPicker.setVisible(true, forFirstResponder: canvasView)
+      canvasView.becomeFirstResponder()
+    } else {
+      toolPicker.setVisible(false, forFirstResponder: canvasView)
+      canvasView.resignFirstResponder()
+    }
   }
 
   private func createToolWithFallback(from config: [String: Any]) -> PKTool {
