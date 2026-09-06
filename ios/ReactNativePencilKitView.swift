@@ -266,6 +266,76 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
 
   // MARK: - Background Image Props
 
+  // MARK: - Image loading
+
+  /// Loads an image and, on failure, says WHY.
+  ///
+  /// This replaces `try? Data(contentsOf: url)` at both call sites. That expression
+  /// discarded the reason — a URL with no scheme, a 404 that returned an HTML body, a
+  /// timeout and an undecodable payload all collapsed into the same nil — so
+  /// `onBoundaryImageLoad` could only ever report "Failed to load boundary image".
+  /// The most common cause in practice is the one it hid most completely: a relative
+  /// asset key ("/assets/page.png") that was never resolved against a host.
+  ///
+  /// It also replaces a synchronous, timeout-less fetch. `Data(contentsOf:)` on a
+  /// remote URL blocks its thread with no deadline and never inspects the HTTP status,
+  /// so a 404 whose body happens to be HTML fails at the decode step and reports as
+  /// "not an image" rather than as "not found".
+  private static func loadImage(from url: URL, timeout: TimeInterval = 20) -> (image: UIImage?, error: String?) {
+    if url.isFileURL {
+      guard let data = try? Data(contentsOf: url) else {
+        return (nil, "file not readable: \(url.path)")
+      }
+      guard let image = UIImage(data: data) else {
+        return (nil, "file is not a decodable image (\(data.count) bytes): \(url.path)")
+      }
+      return (image, nil)
+    }
+
+    guard let scheme = url.scheme, scheme == "http" || scheme == "https" else {
+      // Exactly the shape of an unresolved relative asset key.
+      return (nil, "no http(s) scheme — a relative path was not resolved against a host: \(url.absoluteString)")
+    }
+
+    var request = URLRequest(url: url)
+    request.timeoutInterval = timeout
+
+    var body: Data?
+    var statusText = "?"
+    var status: Int?
+    var transportError: String?
+    let done = DispatchSemaphore(value: 0)
+
+    URLSession.shared.dataTask(with: request) { data, response, error in
+      body = data
+      if let http = response as? HTTPURLResponse {
+        status = http.statusCode
+        statusText = String(http.statusCode)
+      }
+      transportError = error?.localizedDescription
+      done.signal()
+    }.resume()
+
+    // Both callers already run on a background queue, so waiting here preserves the
+    // synchronous call shape the previous implementation had.
+    if done.wait(timeout: .now() + timeout + 5) == .timedOut {
+      return (nil, "timed out after \(Int(timeout))s: \(url.absoluteString)")
+    }
+    if let transportError = transportError {
+      return (nil, "\(transportError): \(url.absoluteString)")
+    }
+    if let status = status, !(200...299).contains(status) {
+      return (nil, "HTTP \(status): \(url.absoluteString)")
+    }
+    guard let body = body, !body.isEmpty else {
+      return (nil, "empty response: \(url.absoluteString)")
+    }
+    guard let image = UIImage(data: body) else {
+      return (nil, "response is not a decodable image (\(body.count) bytes, HTTP \(statusText)): \(url.absoluteString)")
+    }
+    return (image, nil)
+  }
+
   // Called when the React Native `imagePath` prop changes.
   // Loads the image asynchronously on a background thread, then sets it on the main thread.
   func setImagePath(_ imagePath: [String: Any]?) {
@@ -279,9 +349,11 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
 
     // Load image off the main thread to avoid blocking the UI
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-      guard let data = try? Data(contentsOf: url),
-            let image = UIImage(data: data)
-      else {
+      let result = ReactNativePencilKitView.loadImage(from: url)
+      guard let image = result.image else {
+        // This prop carries no load callback, so the failure used to be entirely
+        // silent — a blank page and nothing to search for. Log the reason at least.
+        NSLog("[PencilKit] imagePath failed: %@", result.error ?? "unknown")
         DispatchQueue.main.async { self?.clearBackgroundImage() }
         return
       }
@@ -332,12 +404,20 @@ public class ReactNativePencilKitView: ExpoView, PKCanvasViewDelegate, PKToolPic
     let dilation = boundaryOutlineDilation
 
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-      guard let data = try? Data(contentsOf: url),
-            let image = UIImage(data: data)
-      else {
+      let result = ReactNativePencilKitView.loadImage(from: url)
+      guard let image = result.image else {
+        let reason = result.error ?? "unknown"
+        NSLog("[PencilKit] boundaryImagePath failed: %@", reason)
         DispatchQueue.main.async {
           self?.clearBoundaryImage()
-          self?.onBoundaryImageLoad(["success": false, "error": "Failed to load boundary image"])
+          // The reason travels to JS now. Callers were previously handed one fixed
+          // string for every cause and had no way to tell a bad URL from a 404.
+          self?.onBoundaryImageLoad([
+            "success": false,
+            "error": "Failed to load boundary image",
+            "reason": reason,
+            "uri": uriString,
+          ])
         }
         return
       }

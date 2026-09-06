@@ -48,7 +48,23 @@ export interface BoundaryImageLoadEvent {
   regionCount?: number;
   width?: number;
   height?: number;
+  /**
+   * Fixed, human-readable label. Always "Failed to load boundary image" on failure —
+   * kept stable for callers that match on it. It says nothing about the cause; read
+   * `reason` for that.
+   */
   error?: string;
+  /**
+   * Why it failed, specifically: a URL with no http(s) scheme (an unresolved relative
+   * asset key — by far the most common cause), an HTTP status, a timeout, a transport
+   * error, an empty body, or an undecodable payload with its byte count.
+   *
+   * Absent on builds before this field shipped, so treat it as optional and fall back
+   * to `error`.
+   */
+  reason?: string;
+  /** The URI the native side was actually handed, so a bad one is visible at a glance. */
+  uri?: string;
 }
 
 /**
